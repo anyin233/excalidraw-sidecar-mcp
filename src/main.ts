@@ -10,8 +10,8 @@
  *   (e.g. Python backend subprocess). No session support.
  */
 
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import cors from "cors";
@@ -153,7 +153,18 @@ export async function startStreamableHTTPServer(
 ): Promise<void> {
   const port = parseInt(process.env.PORT ?? "3001", 10);
 
-  const app = createMcpExpressApp({ host: "localhost" });
+  // DNS rebinding protection: allow localhost plus the configured BASE_URL
+  // hostname. When no BASE_URL is set the server auto-detects from request
+  // headers (reverse proxy), so any Host is accepted.
+  const app = express();
+  app.use(express.json());
+  const allowedHosts = ["localhost", "127.0.0.1", "::1"];
+  if (process.env.BASE_URL) {
+    try {
+      allowedHosts.push(new URL(process.env.BASE_URL).hostname);
+    } catch { /* invalid URL, ignore */ }
+    app.use(hostHeaderValidation(allowedHosts));
+  }
   app.use(cors());
 
   // JSON body parser for session REST API routes (5 MB to match MAX_INPUT_BYTES)
