@@ -5,6 +5,7 @@
  *
  * HTTP mode (default): Starts the remote MCP server with session management
  *   + REST API endpoints for the viewer page.
+ *   Add --static <dir> to also serve frontend files (single-port deployment).
  * stdio mode (--stdio): Starts the local MCP server for embedded use
  *   (e.g. Python backend subprocess). No session support.
  */
@@ -16,6 +17,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import cors from "cors";
 import express from "express";
 import type { Request, Response } from "express";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { FileCheckpointStore } from "./checkpoint-store.js";
 import { createRemoteServer } from "./remote-server.js";
 import { createServer } from "./server.js";
@@ -25,12 +28,18 @@ import { SessionStore } from "./session-store.js";
  * Starts an MCP server with Streamable HTTP transport in stateless mode,
  * plus REST API routes for session management (viewer page).
  *
+ * When `staticDir` is provided, also serves frontend static files and handles
+ * SPA fallback for client-side routes (e.g. /view/:key). This enables
+ * single-port deployment without nginx.
+ *
  * @param createServerFn - Factory function that creates a new McpServer instance per request.
  * @param sessionStore - Session store for the viewer page REST API.
+ * @param staticDir - Optional path to frontend build directory for static file serving.
  */
 export async function startStreamableHTTPServer(
   createServerFn: () => McpServer,
   sessionStore: SessionStore,
+  staticDir?: string,
 ): Promise<void> {
   const port = parseInt(process.env.PORT ?? "3001", 10);
 
@@ -172,6 +181,25 @@ export async function startStreamableHTTPServer(
   });
 
   // ============================================================
+  // Static file serving + SPA fallback (single-port deployment)
+  // ============================================================
+  if (staticDir) {
+    const absDir = resolve(staticDir);
+    const indexHtml = resolve(absDir, "index.html");
+
+    // Serve static assets (JS, CSS, images, fonts)
+    app.use(express.static(absDir, { index: false }));
+
+    // SPA fallback: any GET that didn't match an API route or static file
+    // serves index.html so client-side routing (e.g. /view/:key) works.
+    app.get("/{*path}", (_req: Request, res: Response) => {
+      res.sendFile(indexHtml);
+    });
+
+    console.log(`Serving frontend from ${absDir}`);
+  }
+
+  // ============================================================
   // Start server
   // ============================================================
   const httpServer = app.listen(port, (err) => {
@@ -181,6 +209,9 @@ export async function startStreamableHTTPServer(
     }
     console.log(`MCP server listening on http://localhost:${port}/mcp`);
     console.log(`Session API available at http://localhost:${port}/api/sessions/`);
+    if (staticDir) {
+      console.log(`Viewer available at http://localhost:${port}/`);
+    }
   });
 
   const shutdown = () => {
@@ -205,6 +236,23 @@ export async function startStdioServer(
   await createServerFn().connect(new StdioServerTransport());
 }
 
+/**
+ * Parse --static <dir> from argv.
+ *
+ * @returns The static directory path, or undefined if not specified.
+ */
+function parseStaticDir(): string | undefined {
+  const idx = process.argv.indexOf("--static");
+  if (idx === -1 || idx + 1 >= process.argv.length) return undefined;
+  const dir = process.argv[idx + 1];
+  const abs = resolve(dir);
+  if (!existsSync(abs)) {
+    console.error(`Static directory not found: ${abs}`);
+    process.exit(1);
+  }
+  return abs;
+}
+
 async function main() {
   const checkpointStore = new FileCheckpointStore();
 
@@ -215,8 +263,17 @@ async function main() {
   } else {
     // HTTP mode: remote MCP server with session management
     const sessionStore = new SessionStore();
+    const staticDir = parseStaticDir();
+
+    // When serving static files, default BASE_URL to self (same origin)
+    // so viewer links point to this server instead of a separate frontend.
+    if (staticDir && !process.env.BASE_URL) {
+      const port = parseInt(process.env.PORT ?? "3001", 10);
+      process.env.BASE_URL = `http://localhost:${port}`;
+    }
+
     const factory = () => createRemoteServer(sessionStore, checkpointStore);
-    await startStreamableHTTPServer(factory, sessionStore);
+    await startStreamableHTTPServer(factory, sessionStore, staticDir);
   }
 }
 

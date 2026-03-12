@@ -20,8 +20,15 @@ import {
 } from "./shared.js";
 import { renderSvg } from "./svg-renderer.js";
 
-/** Base URL for viewer links. Defaults to local Vite dev server. */
-const BASE_URL = process.env.BASE_URL ?? "http://localhost:5173";
+/**
+ * Get base URL for viewer links. Read lazily so env vars set in main()
+ * before server creation take effect.
+ *
+ * @returns Base URL string.
+ */
+function getBaseUrl(): string {
+  return process.env.BASE_URL ?? "http://localhost:5173";
+}
 
 /**
  * Create a remote MCP server instance with session-based drawing tools.
@@ -51,7 +58,7 @@ export function createRemoteServer(
     },
     async (): Promise<CallToolResult> => {
       const session = sessionStore.createSession();
-      const viewerUrl = `${BASE_URL}/view/${session.sessionKey}`;
+      const viewerUrl = `${getBaseUrl()}/view/${session.sessionKey}`;
       return {
         content: [
           {
@@ -174,7 +181,7 @@ Call read_me first to learn the element format. Requires a session_key from crea
       // Cache SVG
       sessionStore.updateSvgCache(session_key, svgString);
 
-      const viewerUrl = `${BASE_URL}/view/${session_key}`;
+      const viewerUrl = `${getBaseUrl()}/view/${session_key}`;
       const svgBase64 = Buffer.from(svgString).toString("base64");
 
       return {
@@ -252,7 +259,7 @@ To remove elements: {"type":"delete","ids":"<id1>,<id2>"}${ratioHint}`,
         }
       }
 
-      const viewerUrl = `${BASE_URL}/view/${session_key}`;
+      const viewerUrl = `${getBaseUrl()}/view/${session_key}`;
       const svgBase64 = Buffer.from(svgString).toString("base64");
 
       return {
