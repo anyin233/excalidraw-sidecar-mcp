@@ -32,10 +32,10 @@
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
     "@modelcontextprotocol/ext-apps": "^0.4.0",
-    "@modelcontextprotocol/sdk": "1.25.2",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "jsdom": "^25.0.0",
+    "jsdom": "^28.0.0",
     "mcp-handler": "1.0.7",
     "morphdom": "^2.7.8",
     "react": "^19.0.0",
@@ -46,7 +46,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
-    "@types/jsdom": "^21.1.0",
+    "@types/jsdom": "^28.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
@@ -56,6 +56,12 @@
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vite-plugin-singlefile": "^2.3.0"
+  },
+  "overrides": {
+    "dompurify": ">=3.3.2",
+    "nanoid": ">=3.3.8",
+    "mermaid": ">=10.9.4",
+    "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "optionalDependencies": {
     "@oven/bun-darwin-aarch64": "^1.2.21",
