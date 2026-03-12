@@ -5,30 +5,11 @@ description: Draw Excalidraw diagrams via the Excalidraw Sidecar MCP server. Cre
 
 # Excalidraw Sidecar MCP Skill
 
-Draw diagrams using a remote MCP server. This skill wraps the MCP protocol and REST API into CLI commands via `mcp-client.mjs`.
+Claude Code skill，通过远程 MCP 服务器绘制 Excalidraw 图表。将 MCP 协议和 REST API 封装为 CLI 命令。需要先启动 MCP 服务器。
 
 ## Deploy
 
-The MCP server must be running before using this skill.
-
-```bash
-git clone https://github.com/anyin233/excalidraw-sidecar-mcp.git
-cd excalidraw-sidecar-mcp
-npm install && npm run build
-
-# Single-domain deployment (recommended): serves MCP + viewer on one port
-cd ../frontend && npm install && npm run build && cd ../excalidraw-mcp
-node dist/index.js --static ../frontend/dist
-# → MCP server + viewer on http://localhost:3001
-
-# Or MCP-only (no frontend viewer):
-npm run serve
-# → MCP server on http://localhost:3001/mcp
-```
-
-With `--static`, viewer URLs in tool responses point to the same origin (e.g. `http://localhost:3001/view/<key>`), so users can open them directly without a separate frontend server.
-
-For production deployment (Docker, nginx, systemd), see the [README](https://github.com/anyin233/excalidraw-sidecar-mcp#deploy).
+启动 MCP 服务器后使用此 skill。部署见 [README](../README.md)。
 
 ## Configuration
 

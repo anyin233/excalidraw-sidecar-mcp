@@ -1,6 +1,6 @@
 # Excalidraw Sidecar MCP
 
-MCP server that exposes Excalidraw diagram creation over HTTP for external LLMs. Forked from excalidraw/excalidraw-mcp with added remote session management, server-side SVG rendering, and browser viewer.
+excalidraw-mcp 代码库的内部架构参考。描述服务器模式、MCP 工具、REST 路由、SVG 渲染内部原理和关键设计决策。
 
 ## Architecture
 

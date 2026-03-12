@@ -1,24 +1,6 @@
 # Remote MCP API Reference
 
-Detailed reference for the Excalidraw Sidecar MCP server's tools and REST endpoints.
-
-## Deploy
-
-See [README.md](../README.md) for full deployment instructions.
-
-Quick start (single-domain):
-
-```bash
-npm install && npm run build
-cd ../frontend && npm install && npm run build && cd ../excalidraw-mcp
-node dist/index.js --static ../frontend/dist
-# MCP endpoint:  http://localhost:3001/mcp
-# REST API:      http://localhost:3001/api/sessions/
-# Viewer pages:  http://localhost:3001/view/:key
-# Landing page:  http://localhost:3001/
-```
-
-The `--static` flag serves frontend files from the given directory and auto-sets `BASE_URL` to the server's own origin, so viewer links point to the same domain.
+Excalidraw Sidecar MCP 服务器的完整 API 参考。覆盖 MCP 协议握手、四个 MCP 工具、REST API 端点和 Excalidraw 元素格式。部署说明见 [DEPLOYMENT.md](../../DEPLOYMENT.md)。
 
 ---
 
@@ -328,62 +310,6 @@ Use `\n` in the `text` field:
 
 ## Usage Examples
 
-### Node.js: Full Workflow
-
-```javascript
-const BASE = "http://localhost:3001";
-
-// MCP handshake helper
-async function mcpCall(method, params = {}) {
-  const init = await fetch(`${BASE}/mcp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-    body: JSON.stringify({
-      jsonrpc: "2.0", method: "initialize",
-      params: { protocolVersion: "2025-03-26", capabilities: {},
-                clientInfo: { name: "example", version: "1.0" } },
-      id: 1
-    }),
-  });
-  const sid = init.headers.get("mcp-session-id");
-  const h = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
-  if (sid) h["Mcp-Session-Id"] = sid;
-
-  const res = await fetch(`${BASE}/mcp`, {
-    method: "POST", headers: h,
-    body: JSON.stringify([
-      { jsonrpc: "2.0", method: "notifications/initialized" },
-      { jsonrpc: "2.0", method, params, id: 2 },
-    ]),
-  });
-  const text = await res.text();
-  for (const line of text.split("\n")) {
-    if (line.startsWith("data: ")) {
-      const parsed = JSON.parse(line.slice(6));
-      if (parsed.id === 2) return parsed;
-    }
-  }
-}
-
-// 1. Create session
-const sr = await mcpCall("tools/call", { name: "create_session", arguments: {} });
-const key = sr.result.content[0].text.match(/Session key: "([^"]+)"/)[1];
-
-// 2. Draw diagram
-const elements = JSON.stringify([
-  { type: "cameraUpdate", width: 600, height: 400, x: 0, y: 0 },
-  { type: "rectangle", id: "srv", x: 200, y: 150, width: 200, height: 100,
-    backgroundColor: "#a5d8ff", fillStyle: "solid", strokeColor: "#4a9eed" },
-  { type: "text", id: "srv_t", x: 260, y: 190, text: "Server",
-    fontSize: 20, strokeColor: "#1e1e1e" },
-]);
-await mcpCall("tools/call", { name: "create_view", arguments: { session_key: key, elements } });
-
-// 3. Check for user edits
-const view = await mcpCall("tools/call", { name: "get_current_view", arguments: { session_key: key } });
-console.log(view.result.content[0].text);
-```
-
 ### CLI: Scripted Pipeline
 
 ```bash
@@ -407,33 +333,4 @@ $CLI get-view "$KEY"
 
 # Download SVG
 curl -s "$SERVER/api/sessions/$KEY/svg" -o updated-diagram.svg
-```
-
-### Python: REST API Direct Access
-
-```python
-import requests, json
-
-SERVER = "http://localhost:3001"
-
-# Create session via MCP is required first (use CLI or Node.js helper)
-# Then interact via REST API:
-
-key = "your-session-key-here"
-
-# Get elements
-resp = requests.get(f"{SERVER}/api/sessions/{key}/elements")
-elements = resp.json()["elements"]
-
-# Modify and push back
-elements.append({
-    "type": "text", "id": "note", "x": 50, "y": 50,
-    "text": "Added from Python", "fontSize": 16, "strokeColor": "#ef4444"
-})
-requests.put(f"{SERVER}/api/sessions/{key}/elements", json={"elements": elements})
-
-# Download SVG
-svg = requests.get(f"{SERVER}/api/sessions/{key}/svg")
-with open("diagram.svg", "wb") as f:
-    f.write(svg.content)
 ```

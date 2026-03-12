@@ -1,63 +1,12 @@
 # Excalidraw Sidecar MCP
 
-A remote MCP server that lets external LLMs create and manage Excalidraw diagrams over HTTP. Includes a browser-based viewer with live editing, server-side SVG rendering, and a CLI tool for scripted access.
+Excalidraw Sidecar MCP 是一个远程 MCP 服务器，让外部 LLM 通过 HTTP 创建 Excalidraw 图表。提供浏览器实时查看与编辑、服务端 SVG 渲染。API 参考见 [docs/remote-mcp-api.md](docs/remote-mcp-api.md)。
 
 ![Demo](docs/demo.gif)
 
 ## Deploy
 
-### Prerequisites
-
-- Node.js 18+ (for native `fetch`)
-- npm or pnpm
-
-### Single-Domain Deployment (recommended)
-
-Serve the MCP server, REST API, viewer pages, and frontend static files from a single port using the `--static` flag:
-
-```bash
-git clone https://github.com/anyin233/excalidraw-sidecar-mcp.git
-cd excalidraw-sidecar-mcp
-npm install && npm run build
-
-# Build the frontend (from the parent project)
-cd ../frontend && npm install && npm run build && cd ../excalidraw-mcp
-
-# Start with --static pointing to the frontend dist
-node dist/index.js --static ../frontend/dist
-```
-
-Everything runs on `http://localhost:3001`:
-
-| Path | Description |
-|------|-------------|
-| `POST /mcp` | MCP Streamable HTTP endpoint |
-| `/api/sessions/*` | REST API for session management |
-| `/view/:key` | Viewer page (SPA, served from static files) |
-| `/` | Landing page with server status and config |
-
-When `--static` is used, `BASE_URL` is automatically set to the server's own origin, so viewer links in MCP tool responses point to the same domain. No separate frontend server needed.
-
-### Multi-Port Development Setup
-
-For development, run the MCP server and frontend dev server separately:
-
-```bash
-# Terminal 1: MCP server (no --static flag)
-npm run serve
-
-# Terminal 2: Frontend dev server (with Vite proxy to MCP server)
-cd ../frontend && npm run dev
-```
-
-The Vite dev server at `http://localhost:5173` proxies `/api/sessions` and `/mcp` to port 3001 automatically (configured in `frontend/vite.config.ts`).
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3001` | MCP server HTTP port |
-| `BASE_URL` | auto (with `--static`) or `http://localhost:5173` | Base URL embedded in viewer links returned by MCP tools. Auto-set to `http://localhost:<PORT>` when `--static` is used. Can also be set via `--base-url` flag (flag takes precedence). |
+For deployment instructions (prerequisites, build, production), see [DEPLOYMENT.md](../../DEPLOYMENT.md).
 
 ### CLI Flags
 
@@ -67,86 +16,15 @@ The Vite dev server at `http://localhost:5173` proxies `/api/sessions` and `/mcp
 | `--base-url <url>` | Public-facing base URL for viewer links. Use when the server is behind a reverse proxy and cannot detect its own public domain. Takes precedence over the `BASE_URL` environment variable. |
 | `--stdio` | Run in stdio mode (for embedded use by backend subprocess) |
 
-### Production
-
-```bash
-npm run build
-cd ../frontend && npm run build && cd ../excalidraw-mcp
-
-# Single-domain (recommended)
-PORT=3001 node dist/index.js --static ../frontend/dist
-
-# Behind a reverse proxy — specify the public URL
-node dist/index.js --static ../frontend/dist --base-url https://your-domain.com
-
-# Or via environment variable (--base-url flag takes precedence)
-PORT=3001 BASE_URL=https://your-domain.com node dist/index.js --static ../frontend/dist
-```
-
-For process management, use PM2 or systemd:
-
-```bash
-# PM2
-pm2 start dist/index.js --name excalidraw-mcp -- --static ../frontend/dist --base-url https://your-domain.com
-
-# systemd (create /etc/systemd/system/excalidraw-mcp.service)
-[Service]
-ExecStart=/usr/bin/node /opt/excalidraw-sidecar-mcp/dist/index.js --static /opt/excalidraw-sidecar-mcp/frontend-dist --base-url https://your-domain.com
-Environment=PORT=3001
-Restart=always
-```
-
-### Docker
-
-```dockerfile
-FROM node:22-slim
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN npm install --production
-COPY dist/ dist/
-COPY frontend-dist/ frontend-dist/
-ENV PORT=3001
-EXPOSE 3001
-CMD ["node", "dist/index.js", "--static", "frontend-dist"]
-```
-
-### Reverse Proxy (nginx)
-
-With single-domain deployment, all routes are served by the same Node.js process:
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Connection "";
-        proxy_buffering off;           # Required for SSE streaming
-        proxy_read_timeout 300s;
-    }
-}
-```
-
----
-
 ## Basic Workflow
 
 Every drawing session follows a three-step workflow:
 
-```
-1. create_session        2. read_me              3. create_view
-   ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
-   │ Get session   │        │ Learn element │        │ Send elements │
-   │ key + viewer  │───────►│ format &      │───────►│ JSON, get    │
-   │ URL           │        │ color palette │        │ SVG + link   │
-   └──────────────┘        └──────────────┘        └──────────────┘
-         │
-         ▼
-   Share viewer URL with user
-   (e.g. http://localhost:3001/view/<key>)
+```mermaid
+flowchart LR
+    A["1. create_session\nGet session key\n+ viewer URL"] --> B["2. read_me\nLearn element\nformat & colors"]
+    B --> C["3. create_view\nSend elements JSON\nget SVG + link"]
+    A -.->|Share viewer URL| User["User opens viewer"]
 ```
 
 ### Step 1: Create a session
@@ -182,11 +60,11 @@ The viewer page at the URL from step 1 supports:
 
 ---
 
-## Usage
+## Connecting LLMs
 
-### Connect from Claude Desktop
+### Claude Desktop
 
-Add to your Claude Desktop MCP config:
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -198,13 +76,15 @@ Add to your Claude Desktop MCP config:
 }
 ```
 
-Restart Claude Desktop. Then ask:
+Claude Desktop connects via MCP Streamable HTTP. No API key or auth needed.
+
+Restart Claude Desktop, then ask:
 
 > "Draw an architecture diagram showing a load balancer routing to 3 microservices connected to a shared database"
 
 Claude will call `create_session` → `read_me` → `create_view` and return an SVG image with a viewer link.
 
-### Connect from Claude Desktop (stdio mode)
+### Claude Desktop (stdio mode)
 
 ```json
 {
@@ -217,9 +97,33 @@ Claude will call `create_session` → `read_me` → `create_view` and return an 
 }
 ```
 
-### Connect from Any MCP Client
+### Claude Code (CLI)
 
-Any client supporting [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) can connect to `http://<host>:3001/mcp`.
+Use the included skill:
+
+```bash
+# Via the /draw skill command (if installed)
+/draw http://localhost:3001
+
+# Or via the CLI helper directly
+node excalidraw-mcp/skill/scripts/mcp-client.mjs --server http://localhost:3001 create-session
+```
+
+You can also create a config file at the project root or `~/.excalidraw-mcp.json`:
+
+```json
+{
+  "server": "http://localhost:3001"
+}
+```
+
+### Other MCP Clients
+
+Any client supporting [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) can connect to `http://<host>:3001/mcp`. For protocol handshake details, see [docs/remote-mcp-api.md](docs/remote-mcp-api.md#mcp-protocol).
+
+---
+
+## Usage
 
 ### CLI Tool
 
@@ -297,6 +201,8 @@ Then use:
 /draw http://localhost:3001
 ```
 
+See [skill/SKILL.md](skill/SKILL.md) for full usage guide.
+
 ---
 
 ## MCP Tools
@@ -317,24 +223,7 @@ Then use:
 | `/api/sessions/:key/elements` | PUT | Replace elements |
 | `/api/sessions/:key/svg` | GET | Rendered SVG image |
 
-## Element Format
-
-```json
-[
-  {"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0},
-  {"type":"rectangle","id":"box","x":100,"y":100,"width":200,"height":100,
-   "backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed",
-   "strokeWidth":2,"roundness":{"type":3}},
-  {"type":"text","id":"label","x":150,"y":140,"text":"Hello","fontSize":20,
-   "strokeColor":"#1e1e1e"},
-  {"type":"arrow","id":"a1","x":300,"y":150,"width":100,"height":0,
-   "points":[[0,0],[100,0]],"strokeColor":"#1e1e1e","endArrowhead":"arrow"}
-]
-```
-
-Supported types: `rectangle`, `ellipse`, `diamond`, `text`, `arrow`. Use `cameraUpdate` to set viewport. Use `delete` and `restoreCheckpoint` pseudo-elements for incremental edits.
-
-Call `read_me` for the full reference with color palette and examples.
+For complete API documentation, see [docs/remote-mcp-api.md](docs/remote-mcp-api.md).
 
 ## Credits
 
