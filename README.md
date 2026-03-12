@@ -6,7 +6,7 @@ Excalidraw Sidecar MCP 是一个远程 MCP 服务器，让外部 LLM 通过 HTTP
 
 ## Deploy
 
-For deployment instructions (prerequisites, build, production), see [DEPLOYMENT.md](../../DEPLOYMENT.md).
+For deployment instructions (prerequisites, build, production), see [DEPLOYMENT.md](../DEPLOYMENT.md).
 
 ### CLI Flags
 
