@@ -15,6 +15,19 @@ export const RECALL_CHEAT_SHEET = `# Excalidraw Element Format
 
 Thanks for calling read_me! Do NOT call it again in this conversation — you will not see anything new. Now use create_view to draw.
 
+## Basic Workflow
+
+Follow these steps in order:
+
+1. **create_session** — Call this first. You will get a session key and a viewer URL.
+   **IMPORTANT: Tell the user to open the viewer URL in their browser NOW**, before you start drawing. This way they can watch the diagram appear in real time.
+   Example: "I've created a drawing session. Please open this link to watch the diagram: http://…/view/abc-123"
+
+2. **read_me** — You already called this (you're reading it now). No need to call again.
+
+3. **create_view** — Send elements JSON with the session key to draw the diagram. The viewer page updates automatically.
+   You can call create_view multiple times to update the diagram (use restoreCheckpoint for incremental edits).
+
 ## Color Palette (use consistently across all tools)
 
 ### Primary Colors

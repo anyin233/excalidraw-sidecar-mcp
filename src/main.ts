@@ -306,6 +306,9 @@ export async function startStreamableHTTPServer(
     if (staticDir) {
       console.log(`Viewer available at http://localhost:${port}/`);
     }
+    if (process.env.BASE_URL) {
+      console.log(`Viewer links will use base URL: ${process.env.BASE_URL}`);
+    }
   });
 
   const shutdown = () => {
@@ -347,6 +350,19 @@ function parseStaticDir(): string | undefined {
   return abs;
 }
 
+/**
+ * Parse --base-url <url> from argv.
+ * Used when the server is behind a reverse proxy and the public-facing URL
+ * differs from what the server can see locally.
+ *
+ * @returns The base URL string, or undefined if not specified.
+ */
+function parseBaseUrl(): string | undefined {
+  const idx = process.argv.indexOf("--base-url");
+  if (idx === -1 || idx + 1 >= process.argv.length) return undefined;
+  return process.argv[idx + 1].replace(/\/+$/, ""); // strip trailing slashes
+}
+
 async function main() {
   const checkpointStore = new FileCheckpointStore();
 
@@ -358,10 +374,14 @@ async function main() {
     // HTTP mode: remote MCP server with session management
     const sessionStore = new SessionStore();
     const staticDir = parseStaticDir();
+    const cliBaseUrl = parseBaseUrl();
 
-    // When serving static files, default BASE_URL to self (same origin)
-    // so viewer links point to this server instead of a separate frontend.
-    if (staticDir && !process.env.BASE_URL) {
+    // BASE_URL priority: --base-url flag > BASE_URL env var > auto-detect
+    if (cliBaseUrl) {
+      process.env.BASE_URL = cliBaseUrl;
+    } else if (staticDir && !process.env.BASE_URL) {
+      // When serving static files, default BASE_URL to self (same origin)
+      // so viewer links point to this server instead of a separate frontend.
       const port = parseInt(process.env.PORT ?? "3001", 10);
       process.env.BASE_URL = `http://localhost:${port}`;
     }

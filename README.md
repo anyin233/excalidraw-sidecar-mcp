@@ -57,7 +57,15 @@ The Vite dev server at `http://localhost:5173` proxies `/api/sessions` and `/mcp
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3001` | MCP server HTTP port |
-| `BASE_URL` | auto (with `--static`) or `http://localhost:5173` | Base URL embedded in viewer links returned by MCP tools. Auto-set to `http://localhost:<PORT>` when `--static` is used. |
+| `BASE_URL` | auto (with `--static`) or `http://localhost:5173` | Base URL embedded in viewer links returned by MCP tools. Auto-set to `http://localhost:<PORT>` when `--static` is used. Can also be set via `--base-url` flag (flag takes precedence). |
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--static <dir>` | Serve frontend static files from `<dir>` for single-port deployment |
+| `--base-url <url>` | Public-facing base URL for viewer links. Use when the server is behind a reverse proxy and cannot detect its own public domain. Takes precedence over the `BASE_URL` environment variable. |
+| `--stdio` | Run in stdio mode (for embedded use by backend subprocess) |
 
 ### Production
 
@@ -68,7 +76,10 @@ cd ../frontend && npm run build && cd ../excalidraw-mcp
 # Single-domain (recommended)
 PORT=3001 node dist/index.js --static ../frontend/dist
 
-# Or with explicit BASE_URL behind a reverse proxy
+# Behind a reverse proxy — specify the public URL
+node dist/index.js --static ../frontend/dist --base-url https://your-domain.com
+
+# Or via environment variable (--base-url flag takes precedence)
 PORT=3001 BASE_URL=https://your-domain.com node dist/index.js --static ../frontend/dist
 ```
 
@@ -76,13 +87,12 @@ For process management, use PM2 or systemd:
 
 ```bash
 # PM2
-pm2 start dist/index.js --name excalidraw-mcp -- --static ../frontend/dist
+pm2 start dist/index.js --name excalidraw-mcp -- --static ../frontend/dist --base-url https://your-domain.com
 
 # systemd (create /etc/systemd/system/excalidraw-mcp.service)
 [Service]
-ExecStart=/usr/bin/node /opt/excalidraw-sidecar-mcp/dist/index.js --static /opt/excalidraw-sidecar-mcp/frontend-dist
+ExecStart=/usr/bin/node /opt/excalidraw-sidecar-mcp/dist/index.js --static /opt/excalidraw-sidecar-mcp/frontend-dist --base-url https://your-domain.com
 Environment=PORT=3001
-Environment=BASE_URL=https://your-domain.com
 Restart=always
 ```
 
@@ -119,6 +129,56 @@ server {
     }
 }
 ```
+
+---
+
+## Basic Workflow
+
+Every drawing session follows a three-step workflow:
+
+```
+1. create_session        2. read_me              3. create_view
+   ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+   │ Get session   │        │ Learn element │        │ Send elements │
+   │ key + viewer  │───────►│ format &      │───────►│ JSON, get    │
+   │ URL           │        │ color palette │        │ SVG + link   │
+   └──────────────┘        └──────────────┘        └──────────────┘
+         │
+         ▼
+   Share viewer URL with user
+   (e.g. http://localhost:3001/view/<key>)
+```
+
+### Step 1: Create a session
+
+Call the `create_session` tool. It returns:
+- **Session key** — used in all subsequent tool calls
+- **Viewer URL** — share this with the user so they can open the diagram in a browser
+
+**Important:** Always tell the user the viewer URL immediately after creating the session. They should open it in a browser before you start drawing, so they can watch the diagram appear in real time.
+
+### Step 2: Read the element format reference
+
+Call `read_me` once before your first `create_view`. It returns a cheat sheet with:
+- Supported element types (`rectangle`, `ellipse`, `diamond`, `text`, `arrow`)
+- Color palette with hex codes
+- Coordinate system and sizing conventions
+- Full JSON examples
+
+### Step 3: Draw the diagram
+
+Call `create_view` with the session key and a JSON array of Excalidraw elements. It returns:
+- An **SVG image** preview of the rendered diagram
+- A **checkpoint ID** for incremental edits later
+
+To update the diagram, call `create_view` again with a `restoreCheckpoint` reference and new/modified elements — no need to resend everything.
+
+### Viewing & Editing
+
+The viewer page at the URL from step 1 supports:
+- **Live updates** — the page polls for changes every 5 seconds
+- **Pan & zoom** — drag to pan, scroll to zoom, double-click to reset
+- **Interactive editing** — click "Edit Diagram" to open the full Excalidraw editor; changes sync back when you click "Done Editing"
 
 ---
 
