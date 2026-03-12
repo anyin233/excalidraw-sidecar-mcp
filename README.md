@@ -11,52 +11,76 @@ A remote MCP server that lets external LLMs create and manage Excalidraw diagram
 - Node.js 18+ (for native `fetch`)
 - npm or pnpm
 
-### Local
+### Single-Domain Deployment (recommended)
+
+Serve the MCP server, REST API, viewer pages, and frontend static files from a single port using the `--static` flag:
 
 ```bash
 git clone https://github.com/anyin233/excalidraw-sidecar-mcp.git
 cd excalidraw-sidecar-mcp
-npm install
-npm run serve
+npm install && npm run build
+
+# Build the frontend (from the parent project)
+cd ../frontend && npm install && npm run build && cd ../excalidraw-mcp
+
+# Start with --static pointing to the frontend dist
+node dist/index.js --static ../frontend/dist
 ```
 
-The MCP server starts on `http://localhost:3001/mcp`.
+Everything runs on `http://localhost:3001`:
 
-To also run the frontend viewer (for `/view/:sessionKey` pages):
+| Path | Description |
+|------|-------------|
+| `POST /mcp` | MCP Streamable HTTP endpoint |
+| `/api/sessions/*` | REST API for session management |
+| `/view/:key` | Viewer page (SPA, served from static files) |
+| `/` | Landing page with server status and config |
+
+When `--static` is used, `BASE_URL` is automatically set to the server's own origin, so viewer links in MCP tool responses point to the same domain. No separate frontend server needed.
+
+### Multi-Port Development Setup
+
+For development, run the MCP server and frontend dev server separately:
 
 ```bash
-# Terminal 1: MCP server
+# Terminal 1: MCP server (no --static flag)
 npm run serve
 
-# Terminal 2: Frontend (requires the interactive_drawer frontend)
-cd ../frontend && npm install && npm run dev
+# Terminal 2: Frontend dev server (with Vite proxy to MCP server)
+cd ../frontend && npm run dev
 ```
 
-The viewer is then available at `http://localhost:5173/view/<session-key>`.
+The Vite dev server at `http://localhost:5173` proxies `/api/sessions` and `/mcp` to port 3001 automatically (configured in `frontend/vite.config.ts`).
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3001` | MCP server HTTP port |
-| `BASE_URL` | `http://localhost:5173` | Base URL embedded in viewer links returned by MCP tools |
+| `BASE_URL` | auto (with `--static`) or `http://localhost:5173` | Base URL embedded in viewer links returned by MCP tools. Auto-set to `http://localhost:<PORT>` when `--static` is used. |
 
 ### Production
 
 ```bash
 npm run build
-PORT=3001 BASE_URL=https://your-domain.com node dist/index.js
+cd ../frontend && npm run build && cd ../excalidraw-mcp
+
+# Single-domain (recommended)
+PORT=3001 node dist/index.js --static ../frontend/dist
+
+# Or with explicit BASE_URL behind a reverse proxy
+PORT=3001 BASE_URL=https://your-domain.com node dist/index.js --static ../frontend/dist
 ```
 
 For process management, use PM2 or systemd:
 
 ```bash
 # PM2
-pm2 start dist/index.js --name excalidraw-mcp -- --port 3001
+pm2 start dist/index.js --name excalidraw-mcp -- --static ../frontend/dist
 
 # systemd (create /etc/systemd/system/excalidraw-mcp.service)
 [Service]
-ExecStart=/usr/bin/node /opt/excalidraw-sidecar-mcp/dist/index.js
+ExecStart=/usr/bin/node /opt/excalidraw-sidecar-mcp/dist/index.js --static /opt/excalidraw-sidecar-mcp/frontend-dist
 Environment=PORT=3001
 Environment=BASE_URL=https://your-domain.com
 Restart=always
@@ -70,24 +94,29 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN npm install --production
 COPY dist/ dist/
+COPY frontend-dist/ frontend-dist/
 ENV PORT=3001
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/index.js", "--static", "frontend-dist"]
 ```
 
 ### Reverse Proxy (nginx)
 
-```nginx
-location /mcp {
-    proxy_pass http://127.0.0.1:3001;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_buffering off;           # Required for SSE streaming
-    proxy_read_timeout 300s;
-}
+With single-domain deployment, all routes are served by the same Node.js process:
 
-location /api/sessions {
-    proxy_pass http://127.0.0.1:3001;
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;           # Required for SSE streaming
+        proxy_read_timeout 300s;
+    }
 }
 ```
 
@@ -183,10 +212,13 @@ node mcp-client.mjs session-info <session_key>
 
 ### Browser Viewer
 
-Open `http://localhost:5173/view/<session-key>` to:
+Open the viewer URL returned by MCP tools (e.g. `http://localhost:3001/view/<session-key>` with single-domain deployment, or `http://localhost:5173/view/<session-key>` in dev mode):
 
 - See the current diagram rendered as SVG
-- Click **Edit Diagram** to open the Excalidraw editor
+- **Pan** — click and drag to move around the diagram
+- **Zoom** — scroll wheel to zoom in/out; percentage badge shown at bottom-right
+- **Reset** — double-click to reset to fit-all view
+- Click **Edit Diagram** to open the full Excalidraw editor
 - Edit shapes, text, arrows interactively
 - Changes sync back to the server automatically when you click **Done Editing**
 - The page polls for external updates every 5 seconds

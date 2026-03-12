@@ -6,13 +6,19 @@ Detailed reference for the Excalidraw Sidecar MCP server's tools and REST endpoi
 
 See [README.md](../README.md) for full deployment instructions.
 
-Quick start:
+Quick start (single-domain):
 
 ```bash
-npm install && npm run serve
-# MCP endpoint: http://localhost:3001/mcp
-# REST API:     http://localhost:3001/api/sessions/
+npm install && npm run build
+cd ../frontend && npm install && npm run build && cd ../excalidraw-mcp
+node dist/index.js --static ../frontend/dist
+# MCP endpoint:  http://localhost:3001/mcp
+# REST API:      http://localhost:3001/api/sessions/
+# Viewer pages:  http://localhost:3001/view/:key
+# Landing page:  http://localhost:3001/
 ```
+
+The `--static` flag serves frontend files from the given directory and auto-sets `BASE_URL` to the server's own origin, so viewer links point to the same domain.
 
 ---
 
@@ -71,9 +77,11 @@ Create a new drawing session with 24-hour TTL. Maximum 100 concurrent sessions.
 ```
 Session created!
 Session key: "dd9c4dec-60e4-4bc6-ba99-95264c0626cd"
-Viewer URL: http://localhost:5173/view/dd9c4dec-60e4-4bc6-ba99-95264c0626cd
+Viewer URL: http://localhost:3001/view/dd9c4dec-60e4-4bc6-ba99-95264c0626cd
 Expires at: 2026-03-14T12:00:00.000Z
 ```
+
+(The viewer URL points to the MCP server itself when using `--static` single-domain deployment. In multi-port dev mode with Vite, it defaults to `http://localhost:5173`.)
 
 **CLI:**
 ```bash

@@ -32,6 +32,9 @@ docs/
 - REST API at `/api/sessions/*` for viewer page
 - Session-based: `create_session` → `create_view` → `get_current_view`
 - Server-side SVG rendering via JSDOM + Excalidraw
+- **Single-domain deployment** with `--static <dir>`: serves frontend static files,
+  SPA fallback for `/view/:key`, landing page at `/`, auto-sets `BASE_URL` to self.
+  All viewer links point to the same origin — no separate frontend server needed.
 
 **stdio mode** (`--stdio` flag):
 - Local MCP for Claude Desktop embedded use
@@ -89,7 +92,12 @@ npm install
 npm run build    # tsc + vite build + tsc server + bun build
 npm run serve    # bun --watch src/main.ts
 npm run dev      # watch + serve concurrently
+
+# Single-domain deployment (serves frontend + MCP + REST on one port)
+node dist/index.js --static ../frontend/dist
 ```
+
+When using `--static`, rebuild the frontend (`cd ../frontend && npm run build`) whenever frontend code changes — the MCP server serves the static `dist/` directory, not the Vite dev server.
 
 ## Key Design Decisions
 

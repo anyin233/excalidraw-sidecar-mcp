@@ -14,10 +14,19 @@ The MCP server must be running before using this skill.
 ```bash
 git clone https://github.com/anyin233/excalidraw-sidecar-mcp.git
 cd excalidraw-sidecar-mcp
-npm install
+npm install && npm run build
+
+# Single-domain deployment (recommended): serves MCP + viewer on one port
+cd ../frontend && npm install && npm run build && cd ../excalidraw-mcp
+node dist/index.js --static ../frontend/dist
+# → MCP server + viewer on http://localhost:3001
+
+# Or MCP-only (no frontend viewer):
 npm run serve
 # → MCP server on http://localhost:3001/mcp
 ```
+
+With `--static`, viewer URLs in tool responses point to the same origin (e.g. `http://localhost:3001/view/<key>`), so users can open them directly without a separate frontend server.
 
 For production deployment (Docker, nginx, systemd), see the [README](https://github.com/anyin233/excalidraw-sidecar-mcp#deploy).
 
