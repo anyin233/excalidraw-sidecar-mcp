@@ -128,7 +128,7 @@ export async function startStreamableHTTPServer(
 ): Promise<void> {
   const port = parseInt(process.env.PORT ?? "3001", 10);
 
-  const app = createMcpExpressApp({ host: "0.0.0.0" });
+  const app = createMcpExpressApp({ host: "localhost" });
   app.use(cors());
 
   // JSON body parser for session REST API routes (5 MB to match MAX_INPUT_BYTES)
