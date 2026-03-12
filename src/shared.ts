@@ -19,9 +19,9 @@ Thanks for calling read_me! Do NOT call it again in this conversation — you wi
 
 Follow these steps in order:
 
-1. **create_session** — Call this first. You will get a session key and a viewer URL.
+1. **create_session** — Call this first. You will get a session key and a viewer URL (using the server base URL shown above).
    **IMPORTANT: Tell the user to open the viewer URL in their browser NOW**, before you start drawing. This way they can watch the diagram appear in real time.
-   Example: "I've created a drawing session. Please open this link to watch the diagram: http://…/view/abc-123"
+   Always use the exact viewer URL returned by create_session — never guess or construct URLs yourself.
 
 2. **read_me** — You already called this (you're reading it now). No need to call again.
 

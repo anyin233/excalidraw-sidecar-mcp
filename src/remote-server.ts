@@ -21,25 +21,17 @@ import {
 import { renderSvg } from "./svg-renderer.js";
 
 /**
- * Get base URL for viewer links. Read lazily so env vars set in main()
- * before server creation take effect.
- *
- * @returns Base URL string.
- */
-function getBaseUrl(): string {
-  return process.env.BASE_URL ?? "http://localhost:5173";
-}
-
-/**
  * Create a remote MCP server instance with session-based drawing tools.
  *
  * @param sessionStore - Session store for managing drawing sessions.
  * @param checkpointStore - Checkpoint store for element state persistence.
+ * @param baseUrl - Base URL for viewer links (resolved per-request from headers or config).
  * @returns A configured McpServer instance.
  */
 export function createRemoteServer(
   sessionStore: SessionStore,
   checkpointStore: CheckpointStore,
+  baseUrl: string,
 ): McpServer {
   const server = new McpServer({
     name: "Interactive Drawer Remote",
@@ -58,7 +50,7 @@ export function createRemoteServer(
     },
     async (): Promise<CallToolResult> => {
       const session = sessionStore.createSession();
-      const viewerUrl = `${getBaseUrl()}/view/${session.sessionKey}`;
+      const viewerUrl = `${baseUrl}/view/${session.sessionKey}`;
       return {
         content: [
           {
@@ -86,7 +78,8 @@ Use this session key with create_view to draw diagrams. Share the viewer URL so 
       annotations: { readOnlyHint: true },
     },
     async (): Promise<CallToolResult> => {
-      return { content: [{ type: "text", text: RECALL_CHEAT_SHEET }] };
+      const preamble = `**Server base URL: ${baseUrl}**\nAll viewer links in this session use this base URL. When you call create_session, the returned viewer URL will start with ${baseUrl}/view/...\n\n`;
+      return { content: [{ type: "text", text: preamble + RECALL_CHEAT_SHEET }] };
     },
   );
 
@@ -181,7 +174,7 @@ Call read_me first to learn the element format. Requires a session_key from crea
       // Cache SVG
       sessionStore.updateSvgCache(session_key, svgString);
 
-      const viewerUrl = `${getBaseUrl()}/view/${session_key}`;
+      const viewerUrl = `${baseUrl}/view/${session_key}`;
       const svgBase64 = Buffer.from(svgString).toString("base64");
 
       return {
@@ -259,7 +252,7 @@ To remove elements: {"type":"delete","ids":"<id1>,<id2>"}${ratioHint}`,
         }
       }
 
-      const viewerUrl = `${getBaseUrl()}/view/${session_key}`;
+      const viewerUrl = `${baseUrl}/view/${session_key}`;
       const svgBase64 = Buffer.from(svgString).toString("base64");
 
       return {

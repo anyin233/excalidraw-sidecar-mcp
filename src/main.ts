@@ -121,8 +121,33 @@ function renderLandingPage(baseUrl: string): string {
  * @param sessionStore - Session store for the viewer page REST API.
  * @param staticDir - Optional path to frontend build directory for static file serving.
  */
+/**
+ * Detect the public-facing base URL from request headers.
+ * Supports reverse proxy headers (X-Forwarded-Host, X-Forwarded-Proto).
+ * Falls back to the Host header, then to the configured BASE_URL env var.
+ *
+ * @param req - Express request object.
+ * @param fallbackPort - Local server port for localhost fallback.
+ * @returns Resolved base URL string (no trailing slash).
+ */
+function detectBaseUrl(req: Request, fallbackPort: number): string {
+  // Explicit config always wins
+  if (process.env.BASE_URL) return process.env.BASE_URL;
+
+  // Auto-detect from reverse proxy / request headers
+  const fwdHost = req.headers["x-forwarded-host"];
+  const host = (Array.isArray(fwdHost) ? fwdHost[0] : fwdHost) ?? req.headers.host;
+  if (host) {
+    const fwdProto = req.headers["x-forwarded-proto"];
+    const proto = (Array.isArray(fwdProto) ? fwdProto[0] : fwdProto) ?? "http";
+    return `${proto}://${host}`;
+  }
+
+  return `http://localhost:${fallbackPort}`;
+}
+
 export async function startStreamableHTTPServer(
-  createServerFn: () => McpServer,
+  createServerFn: (baseUrl: string) => McpServer,
   sessionStore: SessionStore,
   staticDir?: string,
 ): Promise<void> {
@@ -138,7 +163,7 @@ export async function startStreamableHTTPServer(
   // MCP endpoint (Streamable HTTP transport)
   // ============================================================
   app.all("/mcp", async (req: Request, res: Response) => {
-    const server = createServerFn();
+    const server = createServerFn(detectBaseUrl(req, port));
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
@@ -386,7 +411,7 @@ async function main() {
       process.env.BASE_URL = `http://localhost:${port}`;
     }
 
-    const factory = () => createRemoteServer(sessionStore, checkpointStore);
+    const factory = (baseUrl: string) => createRemoteServer(sessionStore, checkpointStore, baseUrl);
     await startStreamableHTTPServer(factory, sessionStore, staticDir);
   }
 }
