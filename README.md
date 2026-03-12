@@ -1,154 +1,248 @@
 # Excalidraw Sidecar MCP
 
-A remote MCP server that lets external LLMs create and manage Excalidraw diagrams over HTTP. Provides session-based drawing with server-side SVG rendering, a browser viewer for live editing, and a CLI skill for Claude Code integration.
+A remote MCP server that lets external LLMs create and manage Excalidraw diagrams over HTTP. Includes a browser-based viewer with live editing, server-side SVG rendering, and a CLI tool for scripted access.
 
 ![Demo](docs/demo.gif)
 
-## Features
+## Deploy
 
-- **Remote MCP Server** — Streamable HTTP transport at `/mcp`, compatible with Claude Desktop and any MCP client
-- **Session Management** — 24-hour drawing sessions with in-memory store, create/view/edit/delete via 4 MCP tools
-- **Server-Side SVG Rendering** — JSDOM + Excalidraw `exportToSvg` with automatic fallback renderer
-- **Browser Viewer** — Live viewer page at `/view/:sessionKey` with fullscreen Excalidraw editor, auto-polling for external updates
-- **REST API** — CRUD endpoints for session elements (`GET/PUT /api/sessions/:key/elements`)
-- **Checkpoint System** — Incremental diagram updates via `restoreCheckpoint` pseudo-elements
-- **CLI Helper** — Zero-dependency Node.js script wrapping the full MCP protocol handshake
-- **Claude Code Skill** — `/draw` skill with 9-step workflow for drawing from any project
+### Prerequisites
 
-## Quick Start
+- Node.js 18+ (for native `fetch`)
+- npm or pnpm
 
-### 1. Start the Server
+### Local
 
 ```bash
 git clone https://github.com/anyin233/excalidraw-sidecar-mcp.git
 cd excalidraw-sidecar-mcp
 npm install
 npm run serve
-# MCP server listening on http://localhost:3001/mcp
 ```
 
-### 2. Create a Session and Draw
+The MCP server starts on `http://localhost:3001/mcp`.
 
-Using the CLI helper:
+To also run the frontend viewer (for `/view/:sessionKey` pages):
 
 ```bash
-node skill/scripts/mcp-client.mjs --server http://localhost:3001 create-session
-# → Session key: "abc-123-..."
+# Terminal 1: MCP server
+npm run serve
 
-node skill/scripts/mcp-client.mjs --server http://localhost:3001 create-view abc-123-... elements.json
-# → Diagram rendered! Viewer URL: http://localhost:5173/view/abc-123-...
+# Terminal 2: Frontend (requires the interactive_drawer frontend)
+cd ../frontend && npm install && npm run dev
 ```
 
-Or configure Claude Desktop:
+The viewer is then available at `http://localhost:5173/view/<session-key>`.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3001` | MCP server HTTP port |
+| `BASE_URL` | `http://localhost:5173` | Base URL embedded in viewer links returned by MCP tools |
+
+### Production
+
+```bash
+npm run build
+PORT=3001 BASE_URL=https://your-domain.com node dist/index.js
+```
+
+For process management, use PM2 or systemd:
+
+```bash
+# PM2
+pm2 start dist/index.js --name excalidraw-mcp -- --port 3001
+
+# systemd (create /etc/systemd/system/excalidraw-mcp.service)
+[Service]
+ExecStart=/usr/bin/node /opt/excalidraw-sidecar-mcp/dist/index.js
+Environment=PORT=3001
+Environment=BASE_URL=https://your-domain.com
+Restart=always
+```
+
+### Docker
+
+```dockerfile
+FROM node:22-slim
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN npm install --production
+COPY dist/ dist/
+ENV PORT=3001
+EXPOSE 3001
+CMD ["node", "dist/index.js"]
+```
+
+### Reverse Proxy (nginx)
+
+```nginx
+location /mcp {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;           # Required for SSE streaming
+    proxy_read_timeout 300s;
+}
+
+location /api/sessions {
+    proxy_pass http://127.0.0.1:3001;
+}
+```
+
+---
+
+## Usage
+
+### Connect from Claude Desktop
+
+Add to your Claude Desktop MCP config:
 
 ```json
 {
   "mcpServers": {
-    "interactive-drawer": {
+    "excalidraw": {
       "url": "http://localhost:3001/mcp"
     }
   }
 }
 ```
 
-Then ask Claude: *"Draw an architecture diagram showing microservices communicating via a message queue"*
+Restart Claude Desktop. Then ask:
 
-### 3. View and Edit
+> "Draw an architecture diagram showing a load balancer routing to 3 microservices connected to a shared database"
 
-Open the viewer URL in your browser. Edit the diagram with the built-in Excalidraw editor — changes sync back to the server automatically.
+Claude will call `create_session` → `read_me` → `create_view` and return an SVG image with a viewer link.
+
+### Connect from Claude Desktop (stdio mode)
+
+```json
+{
+  "mcpServers": {
+    "excalidraw": {
+      "command": "node",
+      "args": ["/path/to/excalidraw-sidecar-mcp/dist/index.js", "--stdio"]
+    }
+  }
+}
+```
+
+### Connect from Any MCP Client
+
+Any client supporting [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) can connect to `http://<host>:3001/mcp`.
+
+### CLI Tool
+
+The included `skill/scripts/mcp-client.mjs` wraps the MCP protocol handshake into simple commands. Zero dependencies beyond Node.js 18+.
+
+**Setup:**
+
+```bash
+# Option A: Pass server URL each time
+node skill/scripts/mcp-client.mjs --server http://localhost:3001 <command>
+
+# Option B: Create a config file (searched in cwd then home dir)
+echo '{"server": "http://localhost:3001"}' > .excalidraw-mcp.json
+node skill/scripts/mcp-client.mjs <command>
+```
+
+**Commands:**
+
+```bash
+# Create a 24h drawing session
+node mcp-client.mjs create-session
+# → Session key: "abc-123-..."
+# → Viewer URL: http://localhost:5173/view/abc-123-...
+
+# Get element format reference (call once before first draw)
+node mcp-client.mjs read-me
+
+# Draw elements from a JSON file
+node mcp-client.mjs create-view <session_key> elements.json
+
+# Draw elements from stdin
+echo '[{"type":"rectangle","id":"r1","x":0,"y":0,"width":200,"height":100}]' \
+  | node mcp-client.mjs create-view <session_key> -
+
+# Get current view (includes user edits from browser)
+node mcp-client.mjs get-view <session_key>
+
+# Replace all elements via REST API
+node mcp-client.mjs update-elements <session_key> new-elements.json
+
+# Delete specific elements by ID
+node mcp-client.mjs delete-elements <session_key> id1,id2,id3
+
+# Restore from a checkpoint, optionally adding new elements
+node mcp-client.mjs restore-checkpoint <session_key> <checkpoint_id> [extra.json]
+
+# Check session status
+node mcp-client.mjs session-info <session_key>
+```
+
+### Browser Viewer
+
+Open `http://localhost:5173/view/<session-key>` to:
+
+- See the current diagram rendered as SVG
+- Click **Edit Diagram** to open the Excalidraw editor
+- Edit shapes, text, arrows interactively
+- Changes sync back to the server automatically when you click **Done Editing**
+- The page polls for external updates every 5 seconds
+
+### Claude Code Skill
+
+Copy the `skill/` directory into your Claude Code skills to get the `/draw` command:
+
+```bash
+cp -r skill/ /path/to/your/project/.claude/skills/draw/
+```
+
+Then use:
+
+```
+/draw http://localhost:3001
+```
+
+---
 
 ## MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `create_session` | Create a new 24h drawing session, returns session key + viewer URL |
-| `read_me` | Element format reference with color palettes, coordinates, and examples |
-| `create_view` | Render diagram from Excalidraw JSON, returns SVG image + checkpoint ID |
-| `get_current_view` | Get latest SVG including user edits from the browser viewer |
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `create_session` | none | Create a 24h session. Returns session key + viewer URL |
+| `read_me` | none | Element format cheat sheet with colors, coordinates, examples |
+| `create_view` | `session_key`, `elements` (JSON string) | Render diagram. Returns SVG image + checkpoint ID |
+| `get_current_view` | `session_key` | Get latest SVG including browser edits |
 
 ## REST API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/sessions/:key` | GET | Session metadata (existence, expiry) |
+| `/api/sessions/:key` | GET | Session metadata |
 | `/api/sessions/:key/elements` | GET | Current elements array |
-| `/api/sessions/:key/elements` | PUT | Replace elements (user edits) |
+| `/api/sessions/:key/elements` | PUT | Replace elements |
 | `/api/sessions/:key/svg` | GET | Rendered SVG image |
 
-## CLI Helper
+## Element Format
 
-`skill/scripts/mcp-client.mjs` — zero-dependency Node.js script (requires Node 18+ for native `fetch`).
-
-```bash
-# Configuration: pass --server flag or create .excalidraw-mcp.json
-echo '{"server": "http://localhost:3001"}' > .excalidraw-mcp.json
-
-# Commands
-node skill/scripts/mcp-client.mjs create-session
-node skill/scripts/mcp-client.mjs create-view <key> <file.json | ->
-node skill/scripts/mcp-client.mjs get-view <key>
-node skill/scripts/mcp-client.mjs update-elements <key> <file.json | ->
-node skill/scripts/mcp-client.mjs delete-elements <key> <id1,id2,...>
-node skill/scripts/mcp-client.mjs restore-checkpoint <key> <checkpoint_id> [file.json]
-node skill/scripts/mcp-client.mjs session-info <key>
-node skill/scripts/mcp-client.mjs read-me
+```json
+[
+  {"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0},
+  {"type":"rectangle","id":"box","x":100,"y":100,"width":200,"height":100,
+   "backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed",
+   "strokeWidth":2,"roundness":{"type":3}},
+  {"type":"text","id":"label","x":150,"y":140,"text":"Hello","fontSize":20,
+   "strokeColor":"#1e1e1e"},
+  {"type":"arrow","id":"a1","x":300,"y":150,"width":100,"height":0,
+   "points":[[0,0],[100,0]],"strokeColor":"#1e1e1e","endArrowhead":"arrow"}
+]
 ```
 
-Supports file input, stdin (`-`), and piped JSON.
+Supported types: `rectangle`, `ellipse`, `diamond`, `text`, `arrow`. Use `cameraUpdate` to set viewport. Use `delete` and `restoreCheckpoint` pseudo-elements for incremental edits.
 
-## Claude Code Skill
-
-Install the `/draw` skill for Claude Code by copying the `skill/` directory into your project or linking it:
-
-```bash
-# From your project
-cp -r /path/to/excalidraw-sidecar-mcp/skill .claude/skills/draw
-```
-
-Then invoke with:
-```
-/draw http://localhost:3001
-```
-
-## Architecture
-
-```
-External LLM ──MCP/HTTP──> Node.js (port 3001)
-                                ├── /mcp             Streamable HTTP endpoint
-                                ├── Session Store    In-memory, 24h TTL, 100 max
-                                ├── SVG Renderer     JSDOM + exportToSvg + fallback
-                                └── REST API         /api/sessions/*
-
-Browser ───────────────────> Frontend (Vite, port 5173)
-                                ├── /                Chat + drawing app
-                                └── /view/:key       Session viewer + editor
-```
-
-## Configuration
-
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `PORT` | `3001` | HTTP server port |
-| `BASE_URL` | `http://localhost:5173` | Base URL for viewer links in responses |
-
-## Documentation
-
-- [Remote MCP API Reference](docs/remote-mcp-api.md) — Full API docs with examples
-- [Skill Definition](skill/SKILL.md) — Claude Code skill workflow
-- [Config Example](skill/config.example.json) — CLI configuration template
-
-## Running Modes
-
-```bash
-# HTTP mode (default) — remote MCP server with sessions
-npm run serve
-
-# stdio mode — for Claude Desktop local integration
-node dist/index.js --stdio
-
-# Dev mode — watch + serve
-npm run dev
-```
+Call `read_me` for the full reference with color palette and examples.
 
 ## Credits
 

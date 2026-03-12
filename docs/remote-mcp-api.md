@@ -1,36 +1,36 @@
-# Interactive Drawer — Remote MCP API Reference
+# Remote MCP API Reference
 
-The Interactive Drawer exposes a remote MCP server over Streamable HTTP transport, allowing external LLMs and scripts to create Excalidraw diagrams programmatically.
+Detailed reference for the Excalidraw Sidecar MCP server's tools and REST endpoints.
 
-## Architecture
+## Deploy
 
-```
-External LLM / Script ──MCP/HTTP──> Node.js (port 3001)
-                                         ├── /mcp          MCP Streamable HTTP endpoint
-                                         ├── Session Store  (in-memory, 24h TTL)
-                                         ├── SVG Renderer   (JSDOM + exportToSvg)
-                                         └── REST API       /api/sessions/*
+See [README.md](../README.md) for full deployment instructions.
 
-User Browser ──────────────────────> Frontend (Vite, port 5173)
-                                         ├── /              Chat + drawing app
-                                         └── /view/:key     Session viewer page
-```
-
-## Quick Start
-
-### 1. Start the Server
+Quick start:
 
 ```bash
-cd excalidraw-mcp
-npm install
-npm run serve
-# Server starts on http://localhost:3001
+npm install && npm run serve
+# MCP endpoint: http://localhost:3001/mcp
+# REST API:     http://localhost:3001/api/sessions/
 ```
 
-### 2. Create a Session
+---
+
+## MCP Protocol
+
+The server uses [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) transport. All tool calls require a three-step handshake:
+
+1. **Initialize** — `POST /mcp` with `method: "initialize"`
+2. **Notify + Call** — `POST /mcp` (batched) with `notifications/initialized` + `tools/call`
+3. **Parse SSE** — Response is Server-Sent Events; extract `data:` lines as JSON
+
+The CLI tool at `skill/scripts/mcp-client.mjs` handles this automatically.
+
+### Raw Protocol Example
 
 ```bash
-curl -X POST http://localhost:3001/mcp \
+# Step 1: Initialize (save the mcp-session-id header)
+curl -s -D- -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{
@@ -39,111 +39,80 @@ curl -X POST http://localhost:3001/mcp \
     "params": {
       "protocolVersion": "2025-03-26",
       "capabilities": {},
-      "clientInfo": { "name": "my-client", "version": "1.0.0" }
+      "clientInfo": {"name": "my-client", "version": "1.0"}
     },
     "id": 1
   }'
-```
 
-Save the `mcp-session-id` header from the response, then send:
-
-```bash
-curl -X POST http://localhost:3001/mcp \
+# Step 2: Tool call (use mcp-session-id from step 1)
+curl -s -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "Mcp-Session-Id: <session-id>" \
+  -H "Mcp-Session-Id: <session-id-from-step-1>" \
   -d '[
-    { "jsonrpc": "2.0", "method": "notifications/initialized" },
-    { "jsonrpc": "2.0", "method": "tools/call",
-      "params": { "name": "create_session", "arguments": {} }, "id": 2 }
+    {"jsonrpc":"2.0","method":"notifications/initialized"},
+    {"jsonrpc":"2.0","method":"tools/call",
+     "params":{"name":"create_session","arguments":{}}, "id":2}
   ]'
-```
-
-### 3. Draw a Diagram
-
-Use the session key from step 2:
-
-```bash
-curl -X POST http://localhost:3001/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{...initialize...}' # (same initialize + tool call pattern)
-```
-
-Tool call payload:
-```json
-{
-  "name": "create_view",
-  "arguments": {
-    "session_key": "<session-key>",
-    "elements": "[{\"type\":\"rectangle\",\"id\":\"r1\",\"x\":100,\"y\":100,\"width\":200,\"height\":100}]"
-  }
-}
-```
-
-### 4. Open the Viewer
-
-Navigate to `http://localhost:5173/view/<session-key>` in a browser to see the diagram and edit it interactively.
-
-### Using the CLI Helper (Recommended)
-
-The `skill/scripts/mcp-client.mjs` script simplifies the MCP handshake:
-
-```bash
-# Create session
-node skill/scripts/mcp-client.mjs --server http://localhost:3001 create-session
-
-# Draw elements
-node skill/scripts/mcp-client.mjs --server http://localhost:3001 create-view <key> elements.json
-
-# Get current view
-node skill/scripts/mcp-client.mjs --server http://localhost:3001 get-view <key>
 ```
 
 ---
 
-## MCP Tools Reference
-
-The MCP endpoint is `POST /mcp`. All tool calls use the MCP Streamable HTTP protocol (initialize → notifications/initialized → tools/call).
+## MCP Tools
 
 ### create_session
 
-Create a new 24-hour drawing session.
+Create a new drawing session with 24-hour TTL. Maximum 100 concurrent sessions.
 
 **Parameters:** None
 
-**Response:**
+**Returns:** Text with session key, viewer URL, and expiry timestamp.
+
 ```
 Session created!
-Session key: "<uuid>"
-Viewer URL: http://localhost:5173/view/<uuid>
+Session key: "dd9c4dec-60e4-4bc6-ba99-95264c0626cd"
+Viewer URL: http://localhost:5173/view/dd9c4dec-60e4-4bc6-ba99-95264c0626cd
 Expires at: 2026-03-14T12:00:00.000Z
 ```
 
+**CLI:**
+```bash
+node mcp-client.mjs --server http://localhost:3001 create-session
+```
+
+---
+
 ### read_me
 
-Returns the Excalidraw element format reference with color palettes, coordinate tips, and examples.
+Returns the Excalidraw element format reference (~400 lines). Includes color palette, element types, coordinate system, and annotated examples.
 
 **Parameters:** None
 
-**Response:** Full cheat sheet text (~400 lines). Call once per conversation before the first `create_view`.
+**Returns:** Text cheat sheet. Call once before the first `create_view` in a conversation.
+
+**CLI:**
+```bash
+node mcp-client.mjs --server http://localhost:3001 read-me
+```
+
+---
 
 ### create_view
 
-Render a diagram from Excalidraw elements. Returns SVG image + viewer link.
+Render a diagram from Excalidraw elements. Stores elements in the session, saves a checkpoint, renders SVG server-side, and returns the image.
 
 **Parameters:**
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `session_key` | string | Yes | Session key from `create_session` |
-| `elements` | string | Yes | JSON array of Excalidraw elements (stringified) |
+| Name | Type | Description |
+|------|------|-------------|
+| `session_key` | string | UUID from `create_session` |
+| `elements` | string | JSON array of Excalidraw elements (stringified) |
 
-**Response content:**
-1. `TextContent` — Checkpoint ID, viewer URL, usage instructions
-2. `ImageContent` — SVG as base64 with `mimeType: "image/svg+xml"`
+**Returns:**
+1. **TextContent** — Checkpoint ID, viewer URL, and instructions for incremental edits
+2. **ImageContent** — SVG as base64 (`mimeType: "image/svg+xml"`)
 
-**Element format highlights:**
+**Element JSON structure:**
 
 ```json
 [
@@ -151,48 +120,77 @@ Render a diagram from Excalidraw elements. Returns SVG image + viewer link.
   {"type":"rectangle","id":"r1","x":100,"y":100,"width":200,"height":100,
    "backgroundColor":"#a5d8ff","fillStyle":"solid",
    "strokeColor":"#4a9eed","strokeWidth":2,"roundness":{"type":3}},
-  {"type":"text","id":"t1","x":130,"y":140,"text":"Hello","fontSize":20,
-   "strokeColor":"#1e1e1e"}
+  {"type":"text","id":"t1","x":130,"y":140,"text":"My Box",
+   "fontSize":20,"strokeColor":"#1e1e1e"}
 ]
 ```
 
-**Supported element types:** `rectangle`, `ellipse`, `diamond`, `text`, `arrow`
+**Pseudo-elements** (control behavior, not rendered):
 
-**Pseudo-elements (not rendered, control behavior):**
-- `cameraUpdate` — Set viewport: `{"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0}`
-- `delete` — Remove elements: `{"type":"delete","ids":"id1,id2"}`
-- `restoreCheckpoint` — Restore state: `{"type":"restoreCheckpoint","id":"<checkpoint_id>"}`
+| Type | Fields | Purpose |
+|------|--------|---------|
+| `cameraUpdate` | `width`, `height`, `x`, `y` | Set the SVG viewport |
+| `delete` | `ids` (comma-separated) | Remove elements by ID |
+| `restoreCheckpoint` | `id` (checkpoint ID) | Restore previous state before applying new elements |
+
+**Incremental editing** — use the checkpoint ID from the response:
+
+```json
+[
+  {"type":"restoreCheckpoint","id":"c5235f15180b40aba6"},
+  {"type":"delete","ids":"old_element_1,old_element_2"},
+  {"type":"rectangle","id":"new_box","x":50,"y":50,"width":150,"height":80}
+]
+```
 
 **Errors:**
-- Session not found or expired → `isError: true`
-- Invalid JSON → `isError: true` with parse error message
-- Input exceeds 5 MB limit → `isError: true`
+- Session not found or expired
+- Invalid JSON (parse error details included)
+- Input exceeds 5 MB
 
-### get_current_view
+**CLI:**
+```bash
+# From file
+node mcp-client.mjs --server http://localhost:3001 create-view <key> elements.json
 
-Get the latest diagram view, including user edits made via the browser viewer.
-
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `session_key` | string | Yes | Session key from `create_session` |
-
-**Response content:**
-1. `TextContent` — Viewer URL
-2. `ImageContent` — Current SVG as base64
+# From stdin
+echo '[...]' | node mcp-client.mjs --server http://localhost:3001 create-view <key> -
+```
 
 ---
 
-## REST API Reference
+### get_current_view
 
-REST endpoints are available at `http://localhost:3001/api/sessions/`. These are used by the frontend viewer page and can be called directly for element management.
+Get the latest diagram for a session. If the user edited the diagram in the browser viewer, this returns their updated version.
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `session_key` | string | UUID from `create_session` |
+
+**Returns:**
+1. **TextContent** — Viewer URL
+2. **ImageContent** — Current SVG as base64
+
+SVG is cached and only re-rendered when elements change.
+
+**CLI:**
+```bash
+node mcp-client.mjs --server http://localhost:3001 get-view <key>
+```
+
+---
+
+## REST API
+
+REST endpoints run on the same port as the MCP server. Used by the browser viewer and available for direct integration.
 
 ### GET /api/sessions/:key
 
-Get session metadata.
+Session metadata.
 
-**Response (200):**
+**Response `200`:**
 ```json
 {
   "sessionKey": "dd9c4dec-60e4-4bc6-ba99-95264c0626cd",
@@ -201,80 +199,74 @@ Get session metadata.
 }
 ```
 
-**Errors:**
-- `404` — Session not found or expired
-- `400` — Invalid session key format (not a valid UUID)
+**Errors:** `400` invalid UUID format, `404` not found or expired.
+
+**CLI:**
+```bash
+node mcp-client.mjs --server http://localhost:3001 session-info <key>
+```
+
+---
 
 ### GET /api/sessions/:key/elements
 
-Get the current elements array.
+Current elements array.
 
-**Response (200):**
+**Response `200`:**
 ```json
 {
   "elements": [
     {"type":"rectangle","id":"r1","x":100,"y":100,"width":200,"height":100, ...},
-    ...
+    {"type":"text","id":"t1","x":130,"y":140,"text":"My Box", ...}
   ]
 }
 ```
 
+---
+
 ### PUT /api/sessions/:key/elements
 
-Replace all elements in a session. Used by the viewer page to sync user edits.
+Replace all elements in a session. Invalidates SVG cache.
 
-**Request body:**
+**Request:**
 ```json
 {
   "elements": [ ... ]
 }
 ```
 
-**Response (200):**
+**Response `200`:**
 ```json
-{ "ok": true }
+{"ok": true}
 ```
 
-**Errors:**
-- `400` — Missing or invalid `elements` array
-- `404` — Session not found or expired
+**Errors:** `400` missing `elements` array, `404` session not found.
 
-### GET /api/sessions/:key/svg
+**CLI:**
+```bash
+# Replace all elements
+node mcp-client.mjs --server http://localhost:3001 update-elements <key> new.json
 
-Get the rendered SVG image.
-
-**Response (200):** SVG content with `Content-Type: image/svg+xml`
-
-**Errors:**
-- `404` — Session not found or has no diagram yet
-- `500` — SVG rendering failed
+# Delete specific elements (fetches, filters, PUTs back)
+node mcp-client.mjs --server http://localhost:3001 delete-elements <key> id1,id2
+```
 
 ---
 
-## Configuration
+### GET /api/sessions/:key/svg
 
-### Server
+Rendered SVG image. Returns cached version or re-renders if cache is invalidated.
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `PORT` | `3001` | HTTP server port |
-| `BASE_URL` | `http://localhost:5173` | Base URL for viewer links in MCP responses |
+**Response `200`:** SVG content (`Content-Type: image/svg+xml`)
 
-### CLI Helper Config
+**Errors:** `404` no diagram yet, `500` rendering failed.
 
-The `mcp-client.mjs` script resolves the server URL in this order:
+```bash
+# Download SVG
+curl -o diagram.svg http://localhost:3001/api/sessions/<key>/svg
 
-1. `--server <url>` flag
-2. `.excalidraw-mcp.json` in the current working directory
-3. `~/.excalidraw-mcp.json` in the home directory
-
-Config file format:
-```json
-{
-  "server": "http://localhost:3001",
-  "defaultWidth": 800,
-  "defaultHeight": 600
-}
+# Embed in HTML
+<img src="http://localhost:3001/api/sessions/<key>/svg" alt="diagram" />
 ```
 
 ---
@@ -283,179 +275,157 @@ Config file format:
 
 ### Shapes
 
-```json
-{"type":"rectangle","id":"r1","x":0,"y":0,"width":200,"height":100,
- "backgroundColor":"#a5d8ff","fillStyle":"solid",
- "strokeColor":"#4a9eed","strokeWidth":2,
- "roundness":{"type":3}}
-
-{"type":"ellipse","id":"e1","x":0,"y":0,"width":200,"height":100,
- "backgroundColor":"#d0bfff","fillStyle":"solid",
- "strokeColor":"#8b5cf6","strokeWidth":2}
-
-{"type":"diamond","id":"d1","x":0,"y":0,"width":150,"height":100,
- "backgroundColor":"#ffc9c9","fillStyle":"solid",
- "strokeColor":"#ef4444","strokeWidth":2}
-```
-
-### Text
-
-```json
-{"type":"text","id":"t1","x":50,"y":50,
- "text":"Hello World","fontSize":20,
- "strokeColor":"#1e1e1e"}
-```
-
-Multi-line text: use `\n` in the `text` field.
-
-### Arrows
-
-```json
-{"type":"arrow","id":"a1","x":100,"y":100,
- "width":200,"height":0,
- "points":[[0,0],[200,0]],
- "strokeColor":"#1e1e1e","strokeWidth":2,
- "endArrowhead":"arrow"}
-```
-
-Arrow points are relative to `(x, y)`. Set `strokeStyle: "dashed"` for dashed lines.
+| Type | Required Fields | Optional |
+|------|----------------|----------|
+| `rectangle` | `id`, `x`, `y`, `width`, `height` | `backgroundColor`, `fillStyle`, `strokeColor`, `strokeWidth`, `roundness`, `opacity` |
+| `ellipse` | `id`, `x`, `y`, `width`, `height` | same as rectangle |
+| `diamond` | `id`, `x`, `y`, `width`, `height` | same as rectangle |
+| `text` | `id`, `x`, `y`, `text` | `fontSize`, `strokeColor`, `textAlign` |
+| `arrow` | `id`, `x`, `y`, `points` | `strokeColor`, `strokeWidth`, `strokeStyle`, `endArrowhead`, `startArrowhead` |
 
 ### Color Palette
 
-| Color | Hex | Pastel Fill |
-|-------|-----|-------------|
+| Color | Stroke | Fill |
+|-------|--------|------|
 | Blue | `#4a9eed` | `#a5d8ff` |
 | Amber | `#f59e0b` | `#fff3bf` |
 | Green | `#22c55e` | `#c3fae8` |
 | Red | `#ef4444` | `#ffc9c9` |
 | Purple | `#8b5cf6` | `#d0bfff` |
+| Pink | `#ec4899` | `#fcc2d7` |
+| Cyan | `#06b6d4` | `#99e9f2` |
 
-### Camera (Viewport)
+### Arrow Points
+
+Points are relative to `(x, y)`:
 
 ```json
-{"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0}
+{"type":"arrow","id":"a1","x":100,"y":100,
+ "width":200,"height":50,
+ "points":[[0,0],[100,25],[200,50]],
+ "strokeColor":"#1e1e1e","strokeWidth":2,
+ "endArrowhead":"arrow"}
+```
+
+### Multi-line Text
+
+Use `\n` in the `text` field:
+
+```json
+{"type":"text","id":"t1","x":50,"y":50,
+ "text":"Line 1\nLine 2\nLine 3","fontSize":16}
 ```
 
 ---
 
-## Examples
+## Usage Examples
 
-### Node.js Script
+### Node.js: Full Workflow
 
 ```javascript
-import { readFileSync } from "node:fs";
-
 const BASE = "http://localhost:3001";
 
+// MCP handshake helper
 async function mcpCall(method, params = {}) {
-  const initRes = await fetch(`${BASE}/mcp`, {
+  const init = await fetch(`${BASE}/mcp`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-    },
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
     body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-03-26",
-        capabilities: {},
-        clientInfo: { name: "example", version: "1.0.0" },
-      },
-      id: 1,
+      jsonrpc: "2.0", method: "initialize",
+      params: { protocolVersion: "2025-03-26", capabilities: {},
+                clientInfo: { name: "example", version: "1.0" } },
+      id: 1
     }),
   });
+  const sid = init.headers.get("mcp-session-id");
+  const h = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
+  if (sid) h["Mcp-Session-Id"] = sid;
 
-  const sessionId = initRes.headers.get("mcp-session-id");
-  const headers = {
-    "Content-Type": "application/json",
-    Accept: "application/json, text/event-stream",
-  };
-  if (sessionId) headers["Mcp-Session-Id"] = sessionId;
-
-  const callRes = await fetch(`${BASE}/mcp`, {
-    method: "POST",
-    headers,
+  const res = await fetch(`${BASE}/mcp`, {
+    method: "POST", headers: h,
     body: JSON.stringify([
       { jsonrpc: "2.0", method: "notifications/initialized" },
       { jsonrpc: "2.0", method, params, id: 2 },
     ]),
   });
-
-  const text = await callRes.text();
+  const text = await res.text();
   for (const line of text.split("\n")) {
     if (line.startsWith("data: ")) {
-      try {
-        const parsed = JSON.parse(line.slice(6));
-        if (parsed.id === 2) return parsed;
-      } catch {}
+      const parsed = JSON.parse(line.slice(6));
+      if (parsed.id === 2) return parsed;
     }
   }
 }
 
-// Create session
+// 1. Create session
 const sr = await mcpCall("tools/call", { name: "create_session", arguments: {} });
-const sessionKey = sr.result.content[0].text.match(/Session key: "([^"]+)"/)[1];
-console.log("Session:", sessionKey);
+const key = sr.result.content[0].text.match(/Session key: "([^"]+)"/)[1];
 
-// Draw a rectangle with label
+// 2. Draw diagram
 const elements = JSON.stringify([
-  { type: "cameraUpdate", width: 400, height: 300, x: 0, y: 0 },
-  { type: "rectangle", id: "box", x: 50, y: 50, width: 300, height: 200,
+  { type: "cameraUpdate", width: 600, height: 400, x: 0, y: 0 },
+  { type: "rectangle", id: "srv", x: 200, y: 150, width: 200, height: 100,
     backgroundColor: "#a5d8ff", fillStyle: "solid", strokeColor: "#4a9eed" },
-  { type: "text", id: "label", x: 120, y: 140, text: "My Diagram",
-    fontSize: 24, strokeColor: "#1e1e1e" },
+  { type: "text", id: "srv_t", x: 260, y: 190, text: "Server",
+    fontSize: 20, strokeColor: "#1e1e1e" },
 ]);
+await mcpCall("tools/call", { name: "create_view", arguments: { session_key: key, elements } });
 
-const vr = await mcpCall("tools/call", {
-  name: "create_view",
-  arguments: { session_key: sessionKey, elements },
-});
-console.log(vr.result.content[0].text);
+// 3. Check for user edits
+const view = await mcpCall("tools/call", { name: "get_current_view", arguments: { session_key: key } });
+console.log(view.result.content[0].text);
 ```
 
-### CLI Helper Script
+### CLI: Scripted Pipeline
 
 ```bash
-# Setup config (one-time)
-echo '{"server": "http://localhost:3001"}' > .excalidraw-mcp.json
+#!/bin/bash
+SERVER="http://localhost:3001"
+CLI="node skill/scripts/mcp-client.mjs --server $SERVER"
 
-# Full workflow
-SESSION=$(node skill/scripts/mcp-client.mjs create-session 2>&1 | grep 'Session key' | sed 's/.*"\(.*\)".*/\1/')
+# Create session and extract key
+OUTPUT=$($CLI create-session)
+KEY=$(echo "$OUTPUT" | grep 'Session key' | sed 's/.*"\(.*\)".*/\1/')
+echo "Session: $KEY"
 
-cat > /tmp/diagram.json << 'EOF'
-[
-  {"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0},
-  {"type":"rectangle","id":"server","x":300,"y":200,"width":200,"height":120,
-   "backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed","strokeWidth":2,
-   "roundness":{"type":3}},
-  {"type":"text","id":"server_label","x":350,"y":250,"text":"Server","fontSize":20,
-   "strokeColor":"#4a9eed"}
-]
-EOF
+# Draw from file
+$CLI create-view "$KEY" my-diagram.json
 
-node skill/scripts/mcp-client.mjs create-view "$SESSION" /tmp/diagram.json
+# Wait for user to edit in browser...
+read -p "Press enter after editing in the viewer..."
 
-# Check for user edits later
-node skill/scripts/mcp-client.mjs get-view "$SESSION"
+# Fetch updated diagram
+$CLI get-view "$KEY"
 
-# Delete an element
-node skill/scripts/mcp-client.mjs delete-elements "$SESSION" server_label
-
-# Get session info
-node skill/scripts/mcp-client.mjs session-info "$SESSION"
+# Download SVG
+curl -s "$SERVER/api/sessions/$KEY/svg" -o updated-diagram.svg
 ```
 
-### Claude Desktop Configuration
+### Python: REST API Direct Access
 
-To use with Claude Desktop as a remote MCP server:
+```python
+import requests, json
 
-```json
-{
-  "mcpServers": {
-    "interactive-drawer": {
-      "url": "http://localhost:3001/mcp"
-    }
-  }
-}
+SERVER = "http://localhost:3001"
+
+# Create session via MCP is required first (use CLI or Node.js helper)
+# Then interact via REST API:
+
+key = "your-session-key-here"
+
+# Get elements
+resp = requests.get(f"{SERVER}/api/sessions/{key}/elements")
+elements = resp.json()["elements"]
+
+# Modify and push back
+elements.append({
+    "type": "text", "id": "note", "x": 50, "y": 50,
+    "text": "Added from Python", "fontSize": 16, "strokeColor": "#ef4444"
+})
+requests.put(f"{SERVER}/api/sessions/{key}/elements", json={"elements": elements})
+
+# Download SVG
+svg = requests.get(f"{SERVER}/api/sessions/{key}/svg")
+with open("diagram.svg", "wb") as f:
+    f.write(svg.content)
 ```

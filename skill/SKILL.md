@@ -1,24 +1,31 @@
 ---
 name: draw
-description: Draw Excalidraw diagrams via the Interactive Drawer remote MCP server. Creates sessions, renders SVG, manages elements, and provides viewer links for browser-based editing.
+description: Draw Excalidraw diagrams via the Excalidraw Sidecar MCP server. Creates sessions, renders SVG, manages elements, and provides viewer links for browser-based editing.
 ---
 
-# Interactive Drawer MCP Skill
+# Excalidraw Sidecar MCP Skill
 
-Draw diagrams using the Interactive Drawer remote MCP server. This skill wraps the MCP protocol and REST API into simple CLI commands.
+Draw diagrams using a remote MCP server. This skill wraps the MCP protocol and REST API into CLI commands via `mcp-client.mjs`.
 
-## Prerequisites
+## Deploy
 
-The Interactive Drawer MCP server must be running. The user MUST provide the server URL either:
-1. As a skill argument: `/draw http://localhost:3001`
-2. Via a config file: `.excalidraw-mcp.json` in the project root or `~/.excalidraw-mcp.json`
+The MCP server must be running before using this skill.
 
-If no server URL is available, ask the user for it before proceeding.
+```bash
+git clone https://github.com/anyin233/excalidraw-sidecar-mcp.git
+cd excalidraw-sidecar-mcp
+npm install
+npm run serve
+# → MCP server on http://localhost:3001/mcp
+```
+
+For production deployment (Docker, nginx, systemd), see the [README](https://github.com/anyin233/excalidraw-sidecar-mcp#deploy).
 
 ## Configuration
 
-Check for the server URL in this order:
-1. **Skill argument** — the first argument to `/draw` is the server URL
+The user MUST provide the server URL. Resolution order:
+
+1. **Skill argument** — `/draw http://localhost:3001`
 2. **Project config** — `.excalidraw-mcp.json` in the current working directory
 3. **Home config** — `~/.excalidraw-mcp.json`
 
@@ -29,115 +36,101 @@ Config file format:
 }
 ```
 
+If no server URL is available, ask the user for it before proceeding.
+
 ## Helper Script
 
-All commands use the helper script at:
+All commands use:
 ```
-<skill_dir>/scripts/mcp-client.mjs
-```
-
-Where `<skill_dir>` is the directory containing this SKILL.md file. Use `node <skill_dir>/scripts/mcp-client.mjs` to invoke it.
-
-The `--server <url>` flag is always passed explicitly to the script. If the user provided a URL as the skill argument, use that. Otherwise, read it from the config file. If neither is available, ask the user.
-
-## Workflow
-
-### Step 1: Resolve Server URL
-
-```bash
-# From skill argument
-SERVER="<url from /draw argument>"
-
-# Or from config file
-SERVER=$(node -e "const f=require('fs'),p=require('path'); \
-  const c=['.excalidraw-mcp.json',p.join(require('os').homedir(),'.excalidraw-mcp.json')]; \
-  for(const x of c){try{console.log(JSON.parse(f.readFileSync(x,'utf-8')).server);process.exit(0)}catch{}} \
-  console.error('No config found');process.exit(1)")
+node <skill_dir>/scripts/mcp-client.mjs --server <url> <command> [args...]
 ```
 
-### Step 2: Create a Session
+Where `<skill_dir>` is the directory containing this SKILL.md file.
+
+## Usage
+
+### 1. Create a Session
 
 ```bash
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER create-session
 ```
 
-This returns a session key and viewer URL. Save the session key for subsequent commands.
+Returns a session key (UUID) and viewer URL. Save the session key for all subsequent commands.
 
-### Step 3: Get Element Format Reference (First Time)
+### 2. Get Element Format Reference
 
 ```bash
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER read-me
 ```
 
-Read this once per conversation to understand the Excalidraw element format, color palette, and coordinate system.
+Call once per conversation. Returns the full element format reference with color palette, coordinate system, and examples.
 
-### Step 4: Draw Elements
+### 3. Draw Elements
 
-Write the elements JSON to a temporary file, then call create-view:
+Write elements JSON to a temp file, then render:
 
 ```bash
-# Write elements to a temp file
-cat > /tmp/elements.json << 'ELEMENTS_EOF'
+cat > /tmp/elements.json << 'EOF'
 [
   {"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0},
   {"type":"rectangle","id":"r1","x":100,"y":100,"width":200,"height":100,
    "backgroundColor":"#a5d8ff","fillStyle":"solid","strokeColor":"#4a9eed","strokeWidth":2},
   {"type":"text","id":"t1","x":150,"y":140,"text":"Hello!","fontSize":20,"strokeColor":"#1e1e1e"}
 ]
-ELEMENTS_EOF
+EOF
 
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER create-view <session_key> /tmp/elements.json
 ```
 
-The response includes a checkpoint ID for incremental updates.
+Response includes a checkpoint ID for incremental updates.
 
-### Step 5: Get Current View (After User Edits)
+### 4. Get Current View
 
 ```bash
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER get-view <session_key>
 ```
 
-Returns the current SVG including any edits the user made in the browser viewer.
+Returns the latest SVG including any edits the user made in the browser viewer.
 
-### Step 6: Update Elements Directly (REST API)
+### 5. Update Elements (REST)
 
 ```bash
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER update-elements <session_key> /tmp/new-elements.json
 ```
 
-Replaces all session elements. Useful for syncing programmatic changes.
+Replaces all session elements via the REST API.
 
-### Step 7: Delete Specific Elements
+### 6. Delete Elements
 
 ```bash
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER delete-elements <session_key> id1,id2,id3
 ```
 
-Removes elements by their IDs and PUTs the filtered list back.
+Fetches current elements, filters out the given IDs, PUTs the rest back.
 
-### Step 8: Restore from Checkpoint
+### 7. Restore from Checkpoint
 
 ```bash
-# Restore checkpoint and add new elements on top
-node <skill_dir>/scripts/mcp-client.mjs --server $SERVER restore-checkpoint <session_key> <checkpoint_id> /tmp/additional.json
+# Restore and add new elements
+node <skill_dir>/scripts/mcp-client.mjs --server $SERVER restore-checkpoint <session_key> <checkpoint_id> /tmp/extra.json
 
-# Restore checkpoint only (no additions)
+# Restore only
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER restore-checkpoint <session_key> <checkpoint_id>
 ```
 
-### Step 9: Check Session Status
+### 8. Check Session Status
 
 ```bash
 node <skill_dir>/scripts/mcp-client.mjs --server $SERVER session-info <session_key>
 ```
 
-## Important Notes
+## Key Points
 
-- **Session TTL**: Sessions expire after 24 hours. Create a new one if expired.
-- **Element format**: Always call `read-me` once before the first `create-view` in a conversation to learn the element JSON schema.
-- **Camera control**: Include a `cameraUpdate` pseudo-element to set the viewport: `{"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0}`
-- **Checkpoints**: Each `create-view` returns a checkpoint ID. Use it with `restore-checkpoint` to build incrementally instead of re-sending all elements.
-- **Viewer URL**: Share the viewer URL with the user — they can see and edit the diagram in their browser. Use `get-view` to retrieve their edits.
-- **Element IDs**: Always assign stable `id` values to elements so they can be individually deleted or referenced.
-- **Progressive ordering**: Emit elements in visual order (background shapes first, then per-node: shape, label, arrows) for best streaming appearance.
-- **Max input size**: Element JSON is limited to 5 MB per call.
+- **Sessions expire after 24 hours.** Create a new one if expired.
+- **Always call `read-me` once** before the first `create-view` to learn the element format.
+- **Set viewport** with `cameraUpdate`: `{"type":"cameraUpdate","width":800,"height":600,"x":0,"y":0}`
+- **Use checkpoints** for incremental edits instead of re-sending all elements.
+- **Assign stable `id` values** to elements so they can be deleted or referenced individually.
+- **Share the viewer URL** — users can see and edit the diagram at `/view/<session_key>`. Use `get-view` to retrieve their edits.
+- **Element ordering matters** — emit background shapes first, then per-node: shape, label, arrows.
+- **Max input size:** 5 MB per `create-view` call.
