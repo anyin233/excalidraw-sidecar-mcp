@@ -25,6 +25,91 @@ import { createServer } from "./server.js";
 import { SessionStore } from "./session-store.js";
 
 /**
+ * Render a simple landing page for sidecar mode.
+ * Shows server status, endpoints, and links to documentation.
+ *
+ * @param baseUrl - Base URL for links.
+ * @returns HTML string.
+ */
+function renderLandingPage(baseUrl: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excalidraw Sidecar MCP</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #fafafa; color: #1e1e1e; min-height: 100vh;
+         display: flex; align-items: center; justify-content: center; }
+  .container { max-width: 640px; padding: 40px; }
+  h1 { font-size: 28px; margin-bottom: 8px; }
+  .subtitle { color: #6b7280; font-size: 16px; margin-bottom: 32px; }
+  .status { display: flex; align-items: center; gap: 8px; margin-bottom: 24px;
+            padding: 12px 16px; background: #ecfdf5; border-radius: 8px; border: 1px solid #d1fae5; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
+  .status span { color: #15803d; font-size: 14px; font-weight: 500; }
+  .section { margin-bottom: 24px; }
+  .section h2 { font-size: 16px; color: #374151; margin-bottom: 12px; }
+  .endpoint { display: flex; justify-content: space-between; align-items: center;
+              padding: 10px 14px; background: #fff; border: 1px solid #e5e7eb;
+              border-radius: 6px; margin-bottom: 8px; font-size: 14px; }
+  .endpoint .path { font-family: 'SF Mono', Monaco, monospace; color: #4a9eed; font-weight: 500; }
+  .endpoint .desc { color: #6b7280; }
+  .config { background: #1e1e1e; color: #e5e7eb; padding: 16px; border-radius: 8px;
+            font-family: 'SF Mono', Monaco, monospace; font-size: 13px;
+            line-height: 1.6; overflow-x: auto; white-space: pre; }
+  .config .key { color: #7dd3fc; }
+  .config .str { color: #86efac; }
+  a { color: #4a9eed; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .footer { margin-top: 32px; color: #9ca3af; font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Excalidraw Sidecar MCP</h1>
+  <p class="subtitle">Remote MCP server for diagram creation by external LLMs</p>
+
+  <div class="status"><div class="dot"></div><span>Server running</span></div>
+
+  <div class="section">
+    <h2>Endpoints</h2>
+    <div class="endpoint"><span class="path">POST /mcp</span><span class="desc">MCP Streamable HTTP</span></div>
+    <div class="endpoint"><span class="path">GET /api/sessions/:key</span><span class="desc">Session metadata</span></div>
+    <div class="endpoint"><span class="path">GET /api/sessions/:key/elements</span><span class="desc">Elements JSON</span></div>
+    <div class="endpoint"><span class="path">PUT /api/sessions/:key/elements</span><span class="desc">Update elements</span></div>
+    <div class="endpoint"><span class="path">GET /api/sessions/:key/svg</span><span class="desc">Rendered SVG</span></div>
+    <div class="endpoint"><span class="path">/view/:key</span><span class="desc">Viewer + editor page</span></div>
+  </div>
+
+  <div class="section">
+    <h2>Connect from Claude Desktop</h2>
+    <div class="config">{
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"excalidraw"</span>: {
+      <span class="key">"url"</span>: <span class="str">"${baseUrl}/mcp"</span>
+    }
+  }
+}</div>
+  </div>
+
+  <div class="section">
+    <h2>Connect via CLI</h2>
+    <div class="config">node mcp-client.mjs --server ${baseUrl} create-session</div>
+  </div>
+
+  <div class="footer">
+    <a href="https://github.com/anyin233/excalidraw-sidecar-mcp">GitHub</a>
+    &nbsp;&middot;&nbsp; No LLM configuration needed &mdash; this server provides tools, external LLMs connect to it.
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+/**
  * Starts an MCP server with Streamable HTTP transport in stateless mode,
  * plus REST API routes for session management (viewer page).
  *
@@ -189,6 +274,15 @@ export async function startStreamableHTTPServer(
 
     // Serve static assets (JS, CSS, images, fonts)
     app.use(express.static(absDir, { index: false }));
+
+    // Landing page at "/" — in sidecar mode the chat app is not available,
+    // so show a simple page listing active capabilities instead of the
+    // chat layout which asks for LLM API keys.
+    app.get("/", (_req: Request, res: Response) => {
+      const baseUrl = process.env.BASE_URL ?? `http://localhost:${port}`;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(renderLandingPage(baseUrl));
+    });
 
     // SPA fallback: any GET that didn't match an API route or static file
     // serves index.html so client-side routing (e.g. /view/:key) works.
