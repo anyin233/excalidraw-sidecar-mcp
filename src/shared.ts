@@ -28,6 +28,40 @@ Follow these steps in order:
 3. **create_view** — Send elements JSON with the session key to draw the diagram. The viewer page updates automatically.
    You can call create_view multiple times to update the diagram (use restoreCheckpoint for incremental edits).
 
+## Drawing Style (ASK BEFORE DRAWING)
+
+Before your first create_view call, **ask the user** which font and sloppiness (roughness) they prefer. Present the combinations below and let them choose. If they have no preference, use the defaults (Excalifont + Artist).
+
+### Fonts (fontFamily)
+| Value | Name | Style |
+|-------|------|-------|
+| \`1\` | **Excalifont** (default) | Hand-drawn, casual — matches Excalidraw's sketchy aesthetic |
+| \`2\` | **Nunito** | Clean, rounded sans-serif — polished and modern |
+| \`3\` | **Comic Shanns** | Comic/playful — informal and fun |
+
+Set \`fontFamily\` on text elements and in \`label\` objects: \`"fontFamily": 2\`
+
+### Sloppiness (roughness)
+| Value | Name | Style |
+|-------|------|-------|
+| \`0\` | **Architect** | Precise, clean lines — technical / formal |
+| \`1\` | **Artist** (default) | Slightly rough — natural hand-drawn feel |
+| \`2\` | **Cartoonist** | Very rough, wobbly — playful / sketch-like |
+
+Set \`roughness\` on shape and arrow elements: \`"roughness": 0\`
+
+### Recommended Combinations
+| Combination | Font | Roughness | Best For |
+|-------------|------|-----------|----------|
+| **Sketch** (default) | Excalifont (1) | Artist (1) | General diagrams, brainstorming |
+| **Clean** | Nunito (2) | Architect (0) | Technical docs, presentations |
+| **Playful** | Comic Shanns (3) | Cartoonist (2) | Informal, fun, comics |
+| **Hand-drawn formal** | Excalifont (1) | Architect (0) | Hand-written notes, precise sketches |
+| **Polished casual** | Nunito (2) | Artist (1) | Blog posts, explainers |
+| **Comic precise** | Comic Shanns (3) | Architect (0) | Clean comic panels, game design |
+
+Once the user picks a style, apply the chosen \`fontFamily\` and \`roughness\` **consistently to all elements** throughout the diagram. Do not mix styles unless the user explicitly requests it.
+
 ## Color Palette (use consistently across all tools)
 
 ### Primary Colors
