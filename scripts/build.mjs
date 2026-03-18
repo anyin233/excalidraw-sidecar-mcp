@@ -35,7 +35,8 @@ rmSync(join(root, "dist", "src"), { recursive: true, force: true });
 run("tsc -p tsconfig.server.json");
 
 // 5. Bundle server + index
-run('bun build "src/server.ts" --outdir dist --target node');
+// Externalize @resvg/resvg-js (native .node addon, cannot be inlined)
+run('bun build "src/server.ts" --outdir dist --target node --external @resvg/resvg-js');
 run(
-  'bun build "src/main.ts" --outfile "dist/index.js" --target node --banner "#!/usr/bin/env node"',
+  'bun build "src/main.ts" --outfile "dist/index.js" --target node --banner "#!/usr/bin/env node" --external @resvg/resvg-js',
 );

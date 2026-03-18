@@ -18,7 +18,19 @@ import {
   generateCheckpointId,
   resolveElements,
 } from "./shared.js";
+import { Resvg } from "@resvg/resvg-js";
 import { renderSvg } from "./svg-renderer.js";
+
+/**
+ * Convert an SVG string to a PNG buffer using resvg.
+ */
+function svgToPng(svgString: string, width?: number): Buffer {
+  const resvg = new Resvg(svgString, {
+    fitTo: width ? { mode: "width" as const, value: width } : { mode: "original" as const },
+  });
+  const rendered = resvg.render();
+  return Buffer.from(rendered.asPng());
+}
 
 /**
  * Create a remote MCP server instance with session-based drawing tools.
@@ -175,7 +187,10 @@ Call read_me first to learn the element format. Requires a session_key from crea
       sessionStore.updateSvgCache(session_key, svgString);
 
       const viewerUrl = `${baseUrl}/view/${session_key}`;
-      const svgBase64 = Buffer.from(svgString).toString("base64");
+
+      // Convert SVG to PNG for broad LLM compatibility
+      const pngBuffer = svgToPng(svgString, 1200);
+      const pngBase64 = pngBuffer.toString("base64");
 
       return {
         content: [
@@ -191,8 +206,8 @@ To remove elements: {"type":"delete","ids":"<id1>,<id2>"}${ratioHint}`,
           },
           {
             type: "image",
-            data: svgBase64,
-            mimeType: "image/svg+xml",
+            data: pngBase64,
+            mimeType: "image/png",
           },
         ],
       };
@@ -253,13 +268,169 @@ To remove elements: {"type":"delete","ids":"<id1>,<id2>"}${ratioHint}`,
       }
 
       const viewerUrl = `${baseUrl}/view/${session_key}`;
-      const svgBase64 = Buffer.from(svgString).toString("base64");
+
+      // Convert SVG to PNG for broad LLM compatibility
+      const pngBuffer = svgToPng(svgString, 1200);
+      const pngBase64 = pngBuffer.toString("base64");
 
       return {
         content: [
           {
             type: "text",
             text: `Current diagram view.\nViewer URL: ${viewerUrl}`,
+          },
+          {
+            type: "image",
+            data: pngBase64,
+            mimeType: "image/png",
+          },
+        ],
+      };
+    },
+  );
+
+  // ============================================================
+  // Tool 5: create_view_svg
+  // ============================================================
+  server.registerTool(
+    "create_view_svg",
+    {
+      description: `Same as create_view but returns the raw SVG image (image/svg+xml) instead of PNG.
+Use this if your client supports SVG natively. Most LLM APIs (e.g. Claude) do NOT accept SVG in tool results — use create_view (PNG) instead.`,
+      inputSchema: {
+        session_key: z
+          .string()
+          .describe("Session key from create_session."),
+        elements: z
+          .string()
+          .describe(
+            "JSON array string of Excalidraw elements. Must be valid JSON — no comments, no trailing commas. Call read_me first for format reference.",
+          ),
+      },
+      annotations: { readOnlyHint: false },
+    },
+    async ({ session_key, elements }): Promise<CallToolResult> => {
+      const session = sessionStore.getSession(session_key);
+      if (!session) {
+        return {
+          content: [{ type: "text", text: "Session not found or expired. Create a new session with create_session." }],
+          isError: true,
+        };
+      }
+
+      if (elements.length > MAX_INPUT_BYTES) {
+        return {
+          content: [{ type: "text", text: `Elements input exceeds ${MAX_INPUT_BYTES} byte limit.` }],
+          isError: true,
+        };
+      }
+
+      let parsed: any[];
+      try {
+        parsed = JSON.parse(elements);
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: `Invalid JSON in elements: ${(e as Error).message}.` }],
+          isError: true,
+        };
+      }
+
+      const result = await resolveElements(parsed, checkpointStore);
+      if (!result.ok) {
+        return { content: [{ type: "text", text: result.error }], isError: true };
+      }
+
+      const { resolvedElements, ratioHint } = result;
+      sessionStore.updateElements(session_key, resolvedElements);
+
+      const checkpointId = generateCheckpointId();
+      await checkpointStore.save(checkpointId, { elements: resolvedElements });
+
+      let svgString: string;
+      try {
+        svgString = await renderSvg(resolvedElements);
+      } catch (err) {
+        svgString = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><text x="200" y="150" text-anchor="middle" fill="#999">SVG rendering failed</text></svg>';
+        console.error("SVG rendering error:", err);
+      }
+
+      sessionStore.updateSvgCache(session_key, svgString);
+
+      const viewerUrl = `${baseUrl}/view/${session_key}`;
+      const svgBase64 = Buffer.from(svgString).toString("base64");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Diagram rendered (SVG)! Checkpoint id: "${checkpointId}".
+Viewer URL: ${viewerUrl}
+
+To edit this diagram, use restoreCheckpoint:
+  [{"type":"restoreCheckpoint","id":"${checkpointId}"}, ...your new elements...]
+
+To remove elements: {"type":"delete","ids":"<id1>,<id2>"}${ratioHint}`,
+          },
+          {
+            type: "image",
+            data: svgBase64,
+            mimeType: "image/svg+xml",
+          },
+        ],
+      };
+    },
+  );
+
+  // ============================================================
+  // Tool 6: get_current_view_svg
+  // ============================================================
+  server.registerTool(
+    "get_current_view_svg",
+    {
+      description:
+        "Same as get_current_view but returns the raw SVG image (image/svg+xml) instead of PNG. Use only if your client supports SVG natively.",
+      inputSchema: {
+        session_key: z
+          .string()
+          .describe("Session key from create_session."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ session_key }): Promise<CallToolResult> => {
+      const session = sessionStore.getSession(session_key);
+      if (!session) {
+        return {
+          content: [{ type: "text", text: "Session not found or expired. Create a new session with create_session." }],
+          isError: true,
+        };
+      }
+
+      if (session.elements.length === 0) {
+        return {
+          content: [{ type: "text", text: "Session has no diagram yet. Use create_view to draw one first." }],
+          isError: true,
+        };
+      }
+
+      let svgString = session.svgCache;
+      if (!svgString) {
+        try {
+          svgString = await renderSvg(session.elements);
+          sessionStore.updateSvgCache(session_key, svgString);
+        } catch (err) {
+          svgString = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><text x="200" y="150" text-anchor="middle" fill="#999">SVG rendering failed</text></svg>';
+          console.error("SVG rendering error:", err);
+        }
+      }
+
+      const viewerUrl = `${baseUrl}/view/${session_key}`;
+      const svgBase64 = Buffer.from(svgString).toString("base64");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Current diagram view (SVG).\nViewer URL: ${viewerUrl}`,
           },
           {
             type: "image",
